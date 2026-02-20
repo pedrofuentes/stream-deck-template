@@ -1,0 +1,6 @@
+.git
+*.log
+*.js.map
+coverage/
+logs/
+node_modules/

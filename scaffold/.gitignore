@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+__PLUGIN_ID__.sdPlugin/bin/
+__PLUGIN_ID__.sdPlugin/logs/
+*.js.map
+*.tsbuildinfo
+coverage/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db

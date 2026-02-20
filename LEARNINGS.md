@@ -1,0 +1,967 @@
+# Stream Deck Plugin — Learnings & Known Issues
+
+This document captures every hard-won lesson, pitfall, and workaround discovered while building Stream Deck plugins across multiple projects. **Read this before writing any Stream Deck plugin code.**
+
+> Sources: stream-deck-github-utilities, stream-deck-cloudflare-utilities, stream-deck-ical
+
+---
+
+## 1. SVG Rendering on Stream Deck Hardware
+
+### The Encoding Problem (CRITICAL)
+
+Stream Deck has a built-in SVG renderer for button images. There are multiple ways to encode SVGs for `setImage()`, but **only one works reliably on physical hardware**:
+
+| Encoding Method | Works in Software? | Works on Device? | Notes |
+|---|---|---|---|
+| `data:image/svg+xml;charset=utf8,` + escaped SVG | ✅ | ❌ | NEVER renders on physical hardware |
+| `data:image/svg+xml;base64,` + base64 | ✅ | ❌ | Also fails on device |
+| `data:image/svg+xml,` + `encodeURIComponent(svg)` | ✅ | ✅ | **THE ONLY WORKING METHOD** |
+
+**Always use:**
+```typescript
+ev.action.setImage("data:image/svg+xml," + encodeURIComponent(svg));
+```
+
+**Never use:**
+```typescript
+// These look like they work in the Stream Deck app but FAIL on physical hardware
+ev.action.setImage("data:image/svg+xml;charset=utf8," + svg);
+ev.action.setImage("data:image/svg+xml;base64," + btoa(svg));
+```
+
+Source: Discovered in stream-deck-cloudflare-utilities, confirmed in stream-deck-github-utilities.
+
+### Nested `<svg>` Elements Don't Render
+
+Stream Deck's SVG renderer does **not** support nested `<svg>` elements. If you try to embed an icon using:
+
+```xml
+<!-- ❌ DOES NOT WORK ON DEVICE -->
+<svg x="52" y="40" width="40" height="40" viewBox="0 0 36 36">
+  <path d="..."/>
+</svg>
+```
+
+It will render as blank. Instead, use `<g>` with transform:
+
+```xml
+<!-- ✅ WORKS ON DEVICE -->
+<g transform="translate(52,40) scale(1.1111)">
+  <path d="..."/>
+</g>
+```
+
+The scale factor converts between viewBox and target size: `targetSize / viewBoxSize` (e.g., `40/36 = 1.1111`).
+
+### SVG Features That Work
+
+| Feature | Status | Notes |
+|---|---|---|
+| `<rect>`, `<circle>`, `<path>` | ✅ | Basic shapes work |
+| `<text>` with system fonts | ✅ | Arial, Helvetica, sans-serif |
+| `<g>` with transforms | ✅ | translate, scale, rotate |
+| `<animate>` | ✅ | Opacity pulses, etc. |
+| `<animateTransform>` | ✅ | Rotation animations |
+| Nested `<svg>` | ❌ | Use `<g transform>` instead |
+| `<foreignObject>` | ❌ | Not supported |
+| CSS `@keyframes` | ❌ | Use SVG animation elements |
+| External fonts (`@font-face`) | ❌ | Use system fonts only |
+| `<filter>` effects | ⚠️ | Some work, but unreliable |
+| `clip-path` | ⚠️ | Basic clips work, complex fail |
+
+### Canvas Size
+
+- SVG viewport: **144×144** (always use this)
+- Physical OLED pixels: **72×72**
+- Stream Deck renders at 2x, so design at 144 and it'll look crisp at 72
+
+### Accent Bar Pattern for Status Indication
+
+*(Source: cloudflare-utilities)*
+
+A 7px colored dot is barely visible on 72×72 OLED. Use a **6px full-width colored bar** across the top of the key instead:
+
+```
+┌════════════════════════┐  ← 6px colored accent bar (full width)
+│    Worker Name (18px)  │  ← line 1: identifier, #9ca3af, centered
+│      STATUS (30px)     │  ← line 2: main info, #ffffff, bold, centered
+│    metadata (15px)     │  ← line 3: detail, #9ca3af, centered
+└────────────────────────┘
+```
+
+```xml
+<rect y="0" width="144" height="6" rx="3" fill="${statusColor}"/>
+<text x="72" y="46" text-anchor="middle" fill="#9ca3af" font-size="18"
+      font-family="Arial,Helvetica,sans-serif">${name}</text>
+<text x="72" y="88" text-anchor="middle" fill="#ffffff" font-size="30"
+      font-weight="bold" font-family="Arial,Helvetica,sans-serif">${value}</text>
+<text x="72" y="124" text-anchor="middle" fill="#9ca3af" font-size="15"
+      font-family="Arial,Helvetica,sans-serif">${detail}</text>
+```
+
+**Vertical positioning reference (144×144 canvas):**
+
+| Lines | line1 Y | line2 Y | line3 Y |
+|---|---|---|---|
+| 3 lines | 46 | 88 | 124 |
+| 2 lines (name + status) | 56 | 100 | — |
+| 2 lines (status + detail) | — | 70 | 112 |
+| 1 line | — | 86 | — |
+
+### Centralized Key Image Renderer
+
+*(Source: cloudflare-utilities)*
+
+Never construct SVG strings directly in action files. Use a single centralized renderer:
+
+```typescript
+import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
+
+await ev.action.setImage(renderKeyImage({
+  line1: "my-worker",
+  line2: "2h ago",
+  line3: "wrangler",
+  statusColor: STATUS_COLORS.green,
+}));
+```
+
+### OLED-Tested Color Palette
+
+*(Source: cloudflare-utilities)*
+
+Hardware-tested palette — random colors often look washed out on OLED:
+
+| Role | Hex | Usage |
+|---|---|---|
+| OK / Live | `#4ade80` | Healthy, deployed |
+| Warning | `#fbbf24` | Degraded, minor issue |
+| Error | `#f87171` | Down, failed |
+| Recent / Active | `#60a5fa` | Recently changed |
+| Gradual / Partial | `#fb923c` | Split traffic |
+| Neutral | `#9ca3af` | Unknown, N/A |
+| Background | `#0d1117` | Dark navy (OLED true black) |
+| Primary text | `#ffffff` | High contrast |
+| Secondary text | `#9ca3af` | Metadata, labels |
+
+Export as `STATUS_COLORS` — never hardcode hex values in actions.
+
+### Compact Number Formatting for Tiny Keys
+
+*(Source: cloudflare-utilities)*
+
+Numbers like "1,234,567" don't fit at 30px bold. Use aggressive abbreviation:
+
+```typescript
+export function formatCompactNumber(value: number): string {
+  if (value < 1000) return Math.round(value).toString();
+  if (value < 1_000_000) {
+    const k = value / 1000;
+    return k >= 100 ? `${Math.round(k)}K` : `${k.toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  const m = value / 1_000_000;
+  return m >= 100 ? `${Math.round(m)}M` : `${m.toFixed(1).replace(/\.0$/, "")}M`;
+}
+// 0→"0", 42→"42", 1234→"1.2K", 100000→"100K", 1234567→"1.2M"
+```
+
+### Circular Marquee for Long Names
+
+*(Source: cloudflare-utilities)*
+
+Names > 10 chars get truncated on 72×72 OLED. Use a framework-agnostic marquee state machine:
+
+```typescript
+const marquee = new MarqueeController(10); // 10-char visible window
+marquee.setText("some-long-gateway-name");
+
+if (marquee.needsAnimation()) {
+  this.marqueeInterval = setInterval(() => {
+    if (marquee.tick()) reRender(marquee.getCurrentText());
+  }, 500);
+}
+```
+
+Design decisions:
+- Circular scroll (not bounce-back) — like a news ticker
+- `"  •  "` separator (5 chars) between repetitions
+- `MARQUEE_PAUSE_TICKS = 3` pause at loop start
+- 10-char window tested on hardware at 18px font
+- Marquee position preserved across metric cycling but resets on resource change
+
+---
+
+## 2. Manifest.json Gotchas
+
+### Image Path Rules
+- **Omit file extensions** in all image paths: `"imgs/plugin-icon"` not `"imgs/plugin-icon.png"`
+- The SDK resolves `.png` files and will prefer `@2x.png` variants automatically
+- All icons **must be PNG** for packaging — SVG icons will fail `streamdeck validate`
+
+### Required Icon Sizes
+| Icon | Size | @2x Size | Purpose |
+|---|---|---|---|
+| Plugin Icon | 144×144 | 288×288 | Plugin list in Stream Deck app |
+| Category Icon | 144×144 | 288×288 | Category header |
+| Action Icon | 20×20 | 40×40 | Action list sidebar |
+| Key Image | 144×144 | 288×288 | Default button appearance |
+
+### Action Icons Must Be Monochrome White
+
+*(Source: cloudflare-utilities)*
+
+- Action list icons: **Monochromatic white** on **transparent background**, SVG 20×20 viewBox
+- Plugin/marketplace icons: **PNG only** (not SVG), 144×144 + 288×288 @2x
+- No colored fills, no solid backgrounds in action icons — Stream Deck auto-adjusts for light/dark themes
+
+### Title & UserTitleEnabled Placement (CRITICAL)
+
+- `"ShowTitle": false` goes **inside** `States` entries to hide the default title overlay
+- `"UserTitleEnabled": false` goes at the **Action level** (sibling of `States`), NOT inside `States`
+- Placing `UserTitleEnabled` inside `States` is **silently ignored** — user title will overlay your SVG
+
+```json
+{
+  "Name": "My Action",
+  "States": [
+    { "Image": "imgs/actions/my-action", "ShowTitle": false }
+  ],
+  "UserTitleEnabled": false,
+  "UUID": "com.example.my-plugin.my-action"
+}
+```
+
+The `$schema` URL is: `https://schemas.elgato.com/streamdeck/plugins/manifest.json`
+
+### Version Format
+- Manifest uses **4-part** version: `"1.0.0.0"`
+- package.json uses **3-part** semver: `"1.0.0"`
+- Keep them in sync (manifest adds trailing `.0`)
+
+### VisibleInActionsList
+
+*(Source: ical)*
+
+Internal/utility actions that shouldn't appear in the user's action picker:
+
+```json
+{
+  "UUID": "com.example.internal-action",
+  "Name": "Internal Only",
+  "VisibleInActionsList": false,
+  "States": [{ "Image": "imgs/internal" }]
+}
+```
+
+---
+
+## 3. Property Inspector (PI) Patterns
+
+### Token/Credentials Handling
+When using global settings (shared across all actions), there's a **race condition** on first load:
+
+**Problem**: When a user reopens the PI, `getGlobalSettings` may not have the token yet, causing dropdowns to fail to load.
+
+**Solution**: Implement a 3-layer fallback:
+1. `didReceiveGlobalSettings` event handler (primary)
+2. Explicit `getGlobalSettings` request 200ms after WebSocket connection
+3. `onDidReceiveSettings` as final fallback
+
+```javascript
+// In PI HTML - request global settings explicitly after connection
+$SD.on("connected", () => {
+    setTimeout(() => {
+        $SD.getGlobalSettings();
+    }, 200);
+});
+```
+
+### Datasource Dropdowns (`sdpi-components`)
+- Use `datasource="eventName"` on `<sdpi-select>` for dynamic dropdowns
+- The `show-refresh` attribute adds a refresh button
+- `_refreshDropdowns()` is available from popup windows via `window.opener`
+- Cascading: when repo changes, re-fetch workflows/branches/environments
+
+### Popup Window Communication
+Setup/settings popups communicate with the PI via:
+```javascript
+// From popup → PI websocket
+window.opener._sdWebSocket.send(JSON.stringify({...}));
+```
+
+This is because the popup window doesn't have its own Stream Deck connection.
+
+### Setup Window Popup Pattern
+
+*(Source: cloudflare-utilities)*
+
+Shared `setup.html` opened as a popup from any action's PI avoids duplicating credential fields:
+
+```javascript
+// In the action's PI — expose WebSocket for popup
+window.websocket = websocket;
+window.piUUID = uuid;
+setupPopup = window.open("setup.html", "Settings", "width=500,height=350");
+
+// In setup.html (popup) — use parent's WebSocket
+function getWebSocket() { return window.opener && window.opener.websocket; }
+ws.send(JSON.stringify({ event: "setGlobalSettings", context: getPiUUID(), payload: settings }));
+```
+
+**Pitfall**: The popup has no WebSocket of its own — it **must** use `window.opener.websocket`. If the parent PI closes, the popup loses connectivity.
+
+### `ensureOption` Pattern for Dropdown Hydration
+
+*(Source: cloudflare-utilities)*
+
+When a dropdown has a saved value but the API hasn't returned options yet, inject a temporary option:
+
+```javascript
+function ensureOption(selectId, value) {
+  if (!value) return;
+  var sel = document.getElementById(selectId);
+  if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
+    var opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value;
+    sel.appendChild(opt);
+    sel.value = value;
+  }
+}
+```
+
+### Auto-Save with Debounced API Calls
+
+*(Source: cloudflare-utilities)*
+
+Save settings immediately (so they persist) but debounce API-dependent actions:
+
+```javascript
+document.getElementById("apiToken").addEventListener("input", function () {
+  saveGlobalSettings(); // persist immediately
+  clearTimeout(tokenDebounceTimer);
+  if (this.value.trim().length > 10) {
+    tokenDebounceTimer = setTimeout(() => loadAccounts(), 800); // debounce API call
+  }
+});
+```
+
+### SDPI Checkbox HTML Structure
+
+*(Source: ical)*
+
+Checkboxes require a very specific HTML structure for SDPI styling:
+
+```html
+<!-- ✅ CORRECT -->
+<div class="sdpi-item" type="checkbox">
+  <div class="sdpi-item-label">Exclude All-Day</div>
+  <div class="sdpi-item-value">
+    <input type="checkbox" id="excludeAllDay" checked>
+    <label for="excludeAllDay"><span></span>Hide all-day events</label>
+  </div>
+</div>
+```
+
+Key requirements:
+- `type="checkbox"` on the parent `sdpi-item` div
+- Wrap input in `sdpi-item-value` div
+- Include `<label>` with `<span></span>` inside (for the custom checkbox rendering)
+- `for` attribute must match `id`
+
+---
+
+## 4. Action Implementation Patterns
+
+### SingletonAction Per-Button State (CRITICAL)
+
+*(Source: ical)*
+
+`SingletonAction` means ONE class instance handles ALL buttons of that action type. **Never store state on `this` directly** — multiple buttons overwrite each other:
+
+```typescript
+// ❌ WRONG - shared state breaks with multiple buttons
+class MyAction extends SingletonAction {
+  private interval?: NodeJS.Timeout; // Second button overwrites first!
+}
+
+// ✅ CORRECT - per-button state via Map
+interface ButtonState {
+  interval?: NodeJS.Timeout;
+  actionRef?: Action;
+  cacheVersion: number;
+}
+
+class MyAction extends SingletonAction {
+  private buttonStates: Map<string, ButtonState> = new Map();
+
+  onWillAppear(ev: WillAppearEvent) {
+    this.buttonStates.set(ev.action.id, {
+      interval: undefined,
+      actionRef: ev.action,
+      cacheVersion: 0,
+    });
+    this.startTimerForButton(ev.action.id, ev.action);
+  }
+
+  onWillDisappear(ev: WillDisappearEvent) {
+    const state = this.buttonStates.get(ev.action.id);
+    if (state?.interval) clearInterval(state.interval);
+    this.buttonStates.delete(ev.action.id);
+  }
+}
+```
+
+### Action Key Events Require Explicit Override (CRITICAL)
+
+*(Source: ical)*
+
+The Stream Deck SDK does **NOT** route key events through inherited methods. Every action class **must** explicitly override `onKeyUp()`:
+
+```typescript
+// ❌ FAILS - key events not detected in derived class
+class MyAction extends BaseAction {
+  // No onKeyUp override - pressing button does NOTHING!
+}
+
+// ✅ WORKS - explicit override required
+class MyAction extends BaseAction {
+  async onKeyUp(ev: KeyUpEvent<any>): Promise<void> {
+    await super.onKeyUp(ev);
+  }
+}
+```
+
+### Action Registration Must Precede connect()
+
+*(Source: ical)*
+
+Actions registered **after** `streamDeck.connect()` are not recognized:
+
+```typescript
+// ❌ WRONG — actions won't work
+streamDeck.connect();
+streamDeck.actions.registerAction(new MyAction());
+
+// ✅ CORRECT
+streamDeck.actions.registerAction(new MyAction());
+streamDeck.connect(); // Must come AFTER registration
+```
+
+### Polling Actions
+```typescript
+// Store timers keyed by action.id for multi-instance support
+private timers = new Map<string, Timer>();
+
+onWillAppear(ev) {
+    this.refresh(ev); // immediate fetch
+    const interval = settings.refreshInterval ?? 300;
+    this.timers.set(ev.action.id, setInterval(() => this.refresh(ev), interval * 1000));
+}
+
+onWillDisappear(ev) {
+    const timer = this.timers.get(ev.action.id);
+    if (timer) clearInterval(timer);
+    this.timers.delete(ev.action.id);
+}
+```
+
+### Adaptive Polling Based on State
+
+*(Source: cloudflare-utilities)*
+
+Fixed polling is either too slow for active changes or wastes API calls for stable states:
+
+```typescript
+getPollingInterval(state: StatusState | null, baseSeconds: number): number {
+  switch (state) {
+    case "recent":
+    case "gradual":  return 10_000;   // fast poll — user wants live feedback
+    case "error":    return 30_000;   // error back-off
+    default:         return baseSeconds * 1000; // user-configured for stable state
+  }
+}
+```
+
+### Generation Counter to Prevent Stale Timer Callbacks (CRITICAL)
+
+*(Source: cloudflare-utilities)*
+
+When settings change or the user cycles metrics, old `setTimeout` callbacks still in-flight fire and overwrite the display with stale data:
+
+```typescript
+private refreshGeneration = 0;
+
+private async fetchAndSchedule(ev): Promise<void> {
+  this.clearRefreshTimeout();
+  const gen = ++this.refreshGeneration;
+
+  await this.updateMetrics(ev, gen);
+
+  if (this.refreshGeneration !== gen) return; // newer cycle started
+  this.scheduleRefresh(ev);
+}
+```
+
+Every entry point that triggers a fetch increments the generation. Timer callbacks check the generation **before and after** every `await`.
+
+### Settings Interface Requirements
+Settings types **must** have a `JsonValue` index signature:
+```typescript
+import type { JsonValue } from "@elgato/utils";
+
+export interface MySettings {
+    repo?: string;
+    refreshInterval?: number;
+    [key: string]: JsonValue; // REQUIRED — SDK enforces this
+}
+```
+
+### Boolean Defaults for Backwards Compatibility
+
+*(Source: ical)*
+
+When adding new boolean settings, existing users have `undefined`. Handle explicitly:
+
+```typescript
+// ❌ WRONG - undefined becomes false, may change default behavior
+const excludeAllDay = Boolean(settings.excludeAllDay);
+
+// ✅ CORRECT - undefined = true (default on), explicit false = false
+const excludeAllDay = settings.excludeAllDay === undefined ? true : Boolean(settings.excludeAllDay);
+```
+
+### Button State Management
+Always clear the title when using SVG images:
+```typescript
+await ev.action.setImage(renderMyImage(...));
+await ev.action.setTitle(""); // Clear default title overlay
+```
+
+### Error Handling Order
+1. Check if settings are configured → show unconfigured state
+2. Check for global token → show "Setup Required" error
+3. Try API call → show loading state, then result or error
+4. On error, show specific message: "Auth Error", "Not Found", "Rate Limited", etc.
+
+### Rate Limit Handling with Server-Hinted Backoff
+
+*(Source: cloudflare-utilities)*
+
+```typescript
+export class RateLimitError extends Error {
+  readonly retryAfterSeconds: number;
+  constructor(endpoint: string, retryAfter?: number) {
+    const delay = retryAfter ?? 60;
+    super(`Rate limited on ${endpoint} (retry after ${delay}s)`);
+    this.retryAfterSeconds = delay;
+  }
+}
+
+// In API client:
+if (response.status === 429) {
+  const retryAfter = parseInt(response.headers.get("Retry-After") ?? "", 10);
+  throw new RateLimitError("endpoint", isNaN(retryAfter) ? undefined : retryAfter);
+}
+```
+
+**Key rule**: Never show "ERR" if you have cached data. Keep displaying the last good value and retry with backoff.
+
+### Key-Press Cycling Without API Refetch
+
+*(Source: cloudflare-utilities)*
+
+Calling the API on every key press is slow and triggers rate limits. Render from cache on key press; use a flag to suppress the settings echo from `setSettings()`:
+
+```typescript
+private pendingKeyCycle = false;
+
+override async onKeyDown(ev): Promise<void> {
+  this.displayMetric = nextMetric;
+  if (this.lastMetrics) await ev.action.setImage(this.renderMetric(...));
+
+  this.pendingKeyCycle = true;
+  await ev.action.setSettings({ ...settings, metric: nextMetric });
+}
+
+override async onDidReceiveSettings(ev): Promise<void> {
+  if (this.pendingKeyCycle) {
+    this.pendingKeyCycle = false;
+    this.scheduleRefresh(ev); // just reschedule, don't re-render
+    return;
+  }
+  // ... normal settings change flow
+}
+```
+
+### Real-Time Seconds Display
+
+*(Source: cloudflare-utilities)*
+
+A separate 1-second display interval that re-renders from cached data for live-ticking "45s ago" → "46s ago":
+
+```typescript
+private startDisplayRefresh(): void {
+  if (!this.isShowingSeconds()) return;
+  this.displayInterval = setInterval(async () => {
+    await this.actionRef.setImage(this.renderStatus(...));
+    if (!this.isShowingSeconds()) this.clearDisplayInterval(); // self-terminate at "1m"
+  }, 1000);
+}
+```
+
+Purely cosmetic — re-renders from cache, no API calls. Self-terminates when no longer needed.
+
+### Thorough Cleanup on Disappear (CRITICAL)
+
+*(Source: cloudflare-utilities)*
+
+`onWillDisappear` must clear **everything** — leaked timers, listeners, and API clients cause issues on profile switch, plugin restart, or key removal:
+
+```typescript
+override onWillDisappear(): void {
+  this.clearRefreshTimeout();
+  this.stopMarqueeTimer();
+  this.clearDisplayInterval();
+  this.apiClient = null;
+  this.lastMetrics = null;
+  this.pendingKeyCycle = false;
+  if (this.unsubscribeGlobal) { this.unsubscribeGlobal(); this.unsubscribeGlobal = null; }
+}
+```
+
+---
+
+## 5. Architecture Patterns
+
+### Global Settings Pub/Sub for Shared Credentials
+
+*(Source: cloudflare-utilities)*
+
+Multiple actions sharing the same API credentials should use an in-memory store with pub/sub, synced to SD global settings:
+
+```typescript
+// global-settings-store.ts — no SD dependency, easily testable
+let current: GlobalSettings = {};
+const listeners: Listener[] = [];
+
+export function getGlobalSettings(): GlobalSettings { return { ...current }; }
+
+export function updateGlobalSettings(settings: GlobalSettings): void {
+  current = { ...settings };
+  for (const fn of listeners) fn(current);
+}
+
+export function onGlobalSettingsChanged(fn: Listener): () => void {
+  listeners.push(fn);
+  return () => {
+    const idx = listeners.indexOf(fn);
+    if (idx >= 0) listeners.splice(idx, 1);
+  };
+}
+```
+
+Plugin entry wiring:
+```typescript
+streamDeck.settings.getGlobalSettings<GlobalSettings>().then((s) => updateGlobalSettings(s ?? {}));
+streamDeck.settings.onDidReceiveGlobalSettings<GlobalSettings>((ev) => updateGlobalSettings(ev.settings ?? {}));
+```
+
+### Global Settings vs Per-Action Settings
+
+*(Source: ical)*
+
+| Type | PI Call | Plugin Event | Use Case |
+|---|---|---|---|
+| Global | `$SD.setGlobalSettings()` | `onDidReceiveGlobalSettings` | API tokens, shared config |
+| Per-Action | `$SD.setSettings()` | `onDidReceiveSettings` | Button-specific options |
+
+### Service Layer With No SDK Dependencies
+
+*(Source: cloudflare-utilities)*
+
+Services should be plain TypeScript classes with zero `@elgato/streamdeck` imports:
+
+```typescript
+constructor(apiToken: string, accountId: string, baseUrl?: string) {
+  this.apiToken = apiToken;
+  this.baseUrl = baseUrl ?? CLOUDFLARE_API_BASE; // injectable for tests
+}
+```
+
+Testing requires only `vi.stubGlobal("fetch", mockFetch)` — no SD mocking needed.
+
+### Shared Resource Manager with Reference Counting
+
+*(Source: ical)*
+
+When multiple buttons use the same external resource, avoid duplicate fetches with reference counting:
+
+```typescript
+class ResourceManager {
+  private resources: Map<string, { data: any; refCount: number; interval?: Timer }> = new Map();
+  private actionToResource: Map<string, string> = new Map();
+
+  register(actionId: string, resourceId: string): void {
+    let resource = this.resources.get(resourceId);
+    if (!resource) {
+      resource = { data: null, refCount: 0, interval: setInterval(...) };
+      this.resources.set(resourceId, resource);
+    }
+    resource.refCount++;
+    this.actionToResource.set(actionId, resourceId);
+  }
+
+  unregister(actionId: string): void {
+    const resourceId = this.actionToResource.get(actionId);
+    if (!resourceId) return;
+    const resource = this.resources.get(resourceId);
+    if (resource) {
+      resource.refCount--;
+      if (resource.refCount <= 0) {
+        clearInterval(resource.interval);
+        this.resources.delete(resourceId);
+      }
+    }
+    this.actionToResource.delete(actionId);
+  }
+}
+```
+
+### Startup Race Condition: Wait for Cache
+
+*(Source: ical)*
+
+On `onWillAppear`, the cache may not be ready yet. Implement a polling wait with timeout:
+
+```typescript
+private waitForCacheAndStart(actionId: string): void {
+  const state = this.buttonStates.get(actionId);
+  if (!state) return;
+
+  const checkCache = () => {
+    const status = this.getCacheStatus(actionId);
+    if (status !== 'LOADING' && status !== 'INIT') {
+      clearInterval(state.waitingForCacheInterval);
+      state.waitingForCacheInterval = undefined;
+      this.startTimerForButton(actionId);
+      return;
+    }
+    this.updateButton(actionId); // still loading — update display
+  };
+
+  state.waitingForCacheInterval = setInterval(checkCache, 500);
+  checkCache(); // Immediate first check
+}
+```
+
+---
+
+## 6. Testing Patterns
+
+### Mocking the Stream Deck SDK
+```typescript
+const mocks = vi.hoisted(() => ({
+    setImage: vi.fn(),
+    setTitle: vi.fn(),
+    getGlobalSettings: vi.fn().mockResolvedValue({ githubToken: "ghp_test" }),
+    // ... other mocks
+}));
+
+vi.mock("@elgato/streamdeck", () => ({
+    default: {
+        settings: { getGlobalSettings: mocks.getGlobalSettings },
+        actions: { registerAction: vi.fn() },
+    },
+}));
+```
+
+### SVG Assertion Helpers
+```typescript
+function decodeSvg(encoded: string): string {
+    return decodeURIComponent(encoded.replace("data:image/svg+xml,", ""));
+}
+function lastImage(): string {
+    const calls = mocks.setImage.mock.calls;
+    return decodeSvg(calls[calls.length - 1][0]);
+}
+```
+
+### What to Test
+- **Happy path**: correct data renders correctly
+- **Error states**: 401, 403, 404, network failure
+- **Edge cases**: empty strings, undefined settings, boundary values (min/max intervals)
+- **Timer management**: cleanup on disappear, reset on settings change
+- **Unconfigured state**: missing repo, missing token
+- **HTTP status codes**: test 400, 401, 403, 404, 429, 500, 502, 503 + network failure + JSON parse failure
+- **Mixed parallel results**: `Promise.all` with some calls succeeding and others failing
+
+### Reset Functions for Singleton Stores
+
+*(Source: cloudflare-utilities)*
+
+Global settings store is a module-level singleton — state leaks between tests. Export a reset function:
+
+```typescript
+// In global-settings-store.ts
+export function resetGlobalSettingsStore(): void {
+  current = {};
+  listeners.length = 0;
+}
+
+// In tests
+beforeEach(() => {
+  resetGlobalSettingsStore();
+});
+```
+
+### Organizing Test Fixtures by Provider
+
+*(Source: ical)*
+
+When working with external data formats, organize fixtures by data source:
+
+```
+__fixtures__/
+├── google-calendar/
+│   ├── simple-event.ics
+│   └── recurring-weekly.ics
+├── outlook/
+│   └── windows-timezones.ics
+└── apple/
+    └── apple-webcal.ics
+```
+
+---
+
+## 7. Build & Release Pipeline
+
+### Package.json Scripts (Complete Set)
+```json
+{
+    "build": "rollup -c",
+    "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart __PLUGIN_ID__\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/ --ext .ts",
+    "lint:fix": "eslint src/ --ext .ts --fix",
+    "validate": "streamdeck validate __PLUGIN_ID__.sdPlugin",
+    "pack": "npm run build && npm run test && streamdeck pack __PLUGIN_ID__.sdPlugin --output release/",
+    "prepack": "npm run validate",
+    "streamdeck:link": "streamdeck link __PLUGIN_ID__.sdPlugin",
+    "streamdeck:unlink": "streamdeck unlink __PLUGIN_ID__.sdPlugin",
+    "streamdeck:restart": "streamdeck restart __PLUGIN_ID__",
+    "streamdeck:stop": "streamdeck stop __PLUGIN_ID__",
+    "streamdeck:validate": "streamdeck validate __PLUGIN_ID__.sdPlugin",
+    "streamdeck:pack": "npm run build && streamdeck pack __PLUGIN_ID__.sdPlugin --output release/",
+    "streamdeck:dev": "streamdeck dev",
+    "streamdeck:dev:disable": "streamdeck dev --disable"
+}
+```
+
+### Release Checklist
+1. `npm test` — all tests pass
+2. `npm run build` — builds successfully
+3. `npm run validate` — manifest validates (0 errors)
+4. `streamdeck pack __PLUGIN_ID__.sdPlugin --output release/` — creates `.streamDeckPlugin`
+5. `gh release create v1.0.0 release/*.streamDeckPlugin --title "v1.0.0 - Title" --notes "..."` — GitHub release
+
+### Icon Conversion
+Icons in the manifest must be **PNG, not SVG**. If you design SVGs, convert them before packaging:
+```javascript
+// Using sharp (install as devDependency, then remove)
+const sharp = require('sharp');
+sharp(fs.readFileSync('icon.svg')).resize(144, 144).png().toFile('icon.png');
+sharp(fs.readFileSync('icon.svg')).resize(288, 288).png().toFile('icon@2x.png');
+```
+
+### Build-Time Debug Mode with Rollup
+
+*(Source: ical)*
+
+Runtime environment variables don't work in bundled Stream Deck plugins. Use compile-time replacement:
+
+```javascript
+// rollup.config.js
+import replace from '@rollup/plugin-replace';
+
+export default {
+  plugins: [
+    replace({
+      preventAssignment: true,
+      values: {
+        'process.env.STREAMDECK_DEBUG': JSON.stringify(process.env.STREAMDECK_DEBUG || '0')
+      }
+    })
+  ]
+};
+```
+
+```powershell
+# Build with debug ON
+$env:STREAMDECK_DEBUG = "1"; npm run build
+
+# Build for production (debug OFF)
+$env:STREAMDECK_DEBUG = "0"; npm run build
+```
+
+---
+
+## 8. File Header Convention
+
+Every `.ts` file must have this header:
+```typescript
+/**
+ * Brief description of the file's purpose
+ *
+ * @author __AUTHOR_SHORT__ <__AUTHOR_EMAIL__>
+ * @copyright __AUTHOR_NAME__
+ * @license MIT
+ */
+```
+
+---
+
+## 9. Git & Repository Standards
+
+### Conventional Commits
+```
+feat(actions): add new action for X
+fix(utils): handle null token in validation
+test(utils): add edge cases for formatCount
+docs(readme): update installation instructions
+chore: prepare v1.0.0 release
+```
+
+### README Badges
+```markdown
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/user/repo/releases)
+[![Tests](https://img.shields.io/badge/tests-N%20passed-brightgreen.svg)](https://github.com/user/repo)
+```
+
+---
+
+## 10. Common Mistakes to Avoid
+
+| Mistake | Consequence | Fix |
+|---|---|---|
+| Using `charset=utf8` SVG encoding | Buttons blank on device | Use `encodeURIComponent` |
+| Nested `<svg>` in button images | Icon area blank on device | Use `<g transform>` |
+| `UserTitleEnabled` inside `States` | Silently ignored, user title overlays SVG | Place at **Action level** as sibling of `States` |
+| SVG icons in manifest | `streamdeck validate` fails | Convert to PNG with @2x |
+| Missing `[key: string]: JsonValue` on settings | TypeScript compile error | Always add index signature |
+| Editing files in `bin/` directory | Changes overwritten on build | Edit `src/` only |
+| Image paths with extensions in manifest | SDK can't find icons | Omit `.png`/`.svg` extensions |
+| Not cleaning title with `setTitle("")` | Default title overlays SVG | Always clear title |
+| Thin font weights in SVG text | Illegible on 72px OLED | Use bold/normal weight only |
+| Testing SVGs only in Stream Deck app | Works in app, blank on device | Always test on physical hardware |
+| Storing state on `this` in SingletonAction | Multiple buttons overwrite each other | Use `Map<string, ButtonState>` keyed by `action.id` |
+| Registering actions after `connect()` | Actions not recognized, buttons blank | Register all actions **before** `streamDeck.connect()` |
+| Missing `onKeyUp` override in subclass | Key presses silently ignored | Every action must explicitly override key events |
+| `Boolean(undefined)` for new settings | Changes default behavior for existing users | Handle `undefined` explicitly with desired default |
+| `setTimeout` * 1000 twice for durations | 8 seconds becomes 2.2 hours | Document units in JSDoc, multiply once |
+| `setSettings()` triggers `onDidReceiveSettings` | Double-render on key press cycling | Use a `pendingKeyCycle` flag to suppress echo |
+| Using runtime `process.env` in plugin | Variables undefined in bundled plugin | Use Rollup `@rollup/plugin-replace` at build time |
+| Colored action list icons | Look wrong in light/dark themes | Use monochrome white on transparent background |
