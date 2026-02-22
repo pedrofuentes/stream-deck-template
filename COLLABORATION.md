@@ -81,11 +81,67 @@ Good moments to offer a contribution:
 
 ---
 
+## Collaboration Areas
+
+Agents contribute and consume knowledge in **three areas**, each with its own shared guide:
+
+| Area | Scaffold File | What It Covers |
+|------|--------------|----------------|
+| **Learnings** | `LEARNINGS.md` | SDK quirks, manifest pitfalls, architecture patterns, build/release — all consolidated from every plugin |
+| **Testing** | `.github/TESTING-PROTOCOL.md` | Test structure, mocking strategies, coverage requirements, pre-release protocol, common pitfalls |
+| **UI / UX Design** | `.github/UI-DESIGN-GUIDE.md` | Accent bar pattern, SVG rendering specs, color palette, typography, marquee system, PI components |
+
+When an agent finds an issue or a new pattern in **any** of these areas, it should:
+
+1. **Check the template repo first** — the latest merged guide may already cover it
+2. **Contribute back** if it's genuinely new (using the contribution format above)
+3. Specify the **area** in the contribution header so it gets merged into the right guide
+
+### Keeping Guides in Sync
+
+The template repo maintains the **canonical merged version** of each guide. Individual plugin repos get their copy when scaffolded. If a plugin discovers improvements:
+
+1. Contribute the finding to `contributions/<plugin-name>.md` with the area tag
+2. The template maintainer (or an agent in the template workspace) merges it into the canonical guide
+3. Other plugins can pull the updated guide from the template repo
+
+---
+
+## Adopting Existing Plugins
+
+Plugins that were **not** scaffolded from this template but participate in the knowledge-sharing ecosystem need explicit collaboration wiring. This applies to the three founding plugins (cloudflare-utilities, github-utilities, ical) that helped create this template.
+
+### What "Adopted" Means
+
+An adopted plugin behaves identically to a scaffolded one for collaboration purposes:
+- Its agent reads `LEARNINGS.md` before major work
+- Its agent proactively offers to contribute discoveries back
+- Its contributions are tracked in `contributions/<plugin-slug>.md`
+- Its agent checks the template's companion guides (Testing Protocol, UI Design Guide)
+
+The only difference: adopted plugins have their own existing `AGENTS.md` structure, so the collaboration instructions are **appended** rather than baked in from the start.
+
+### How to Adopt a Plugin
+
+See **[ADOPTION-INSTRUCTIONS.md](ADOPTION-INSTRUCTIONS.md)** for the exact text to add to each plugin's `.copilot-instructions.md` and `AGENTS.md`.
+
+### Adoption Status
+
+| Plugin | Status | Instructions Added? |
+|---|---|---|
+| cloudflare-utilities | Founding contributor | Needs adoption instructions |
+| github-utilities | Founding contributor | Needs adoption instructions |
+| ical | Founding contributor | Needs adoption instructions |
+
+After adding the instructions, update this table to mark the plugin as adopted.
+
+---
+
 ## Quick Reference: Plugin Ecosystem
 
-| Plugin | Repo | Key Patterns |
-|---|---|---|
-| GitHub Utilities | [GitHub](https://github.com/pedrofuentes/stream-deck-github-utilities) | SVG icons, API polling, status colors |
-| Cloudflare Utilities | [GitHub](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities) | `encodeURIComponent` SVG encoding (original discovery) |
-| iCal | [GitHub](https://github.com/pedrofuentes/stream-deck-ical) | Named calendars, recurring events, rrule, luxon |
-| **Template** | [GitHub](https://github.com/pedrofuentes/stream-deck-template) | Shared learnings, scaffold, collaboration protocol |
+| Plugin | Repo | Origin | Key Patterns |
+|---|---|---|---|
+| GitHub Utilities | [GitHub](https://github.com/pedrofuentes/stream-deck-github-utilities) | Founding contributor | FilterableSelect, short/long press, PI verification gate |
+| Cloudflare Utilities | [GitHub](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities) | Founding contributor | Accent bar, color palette, PollingCoordinator, validate:consistency |
+| iCal | [GitHub](https://github.com/pedrofuentes/stream-deck-ical) | Founding contributor | SingletonAction state, resource manager, debug mode |
+| **Template** | [GitHub](https://github.com/pedrofuentes/stream-deck-template) | — | Shared learnings, scaffold, collaboration protocol |

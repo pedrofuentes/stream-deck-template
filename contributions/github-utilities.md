@@ -1,7 +1,7 @@
 # Contributions: stream-deck-github-utilities
 
 > Source: [stream-deck-github-utilities](https://github.com/pedrofuentes/stream-deck-github-utilities)
-> **Status**: ✅ Merged into `LEARNINGS.md` on February 20, 2026
+> **Status**: ✅ Merged into `LEARNINGS.md` on February 22, 2026
 
 ## Stats
 - **Test count**: 345 tests, 10 test files
@@ -17,6 +17,16 @@
 - Testing patterns (`vi.hoisted()`, SVG assertion helpers, fake timers)
 - Build & release pipeline (Rollup, `streamdeck pack`, GitHub Releases)
 - Action patterns (polling, timer cleanup, error handling order)
+
+### v1.2.0 Contributions (merged February 22, 2026)
+- Short press / long press detection — `onKeyDown`/`onKeyUp` timing with 500ms threshold
+- FilterableSelect searchable dropdown — reusable combobox with keyboard nav, ARIA, viewport flip
+- `sdpi-settings-loaded` custom event — for custom PI components during initialization
+- Viewport-aware dropdown positioning — flip logic, `column-reverse`, 120px minimum
+- Marquee scrolling — `MarqueeController` per-line with circular scroll
+- Documentation & PI Verification pre-release gate — 8-item mandatory checklist
+- Branch naming conventions — `feature/`, `fix/`, `docs/`, `test/`, `release/` prefixes
+- `.streamDeckPlugin` artifact should NOT be committed to repo
 
 ---
 

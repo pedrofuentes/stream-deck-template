@@ -22,7 +22,11 @@ Its purpose is:
 | `TEMPLATE_INSTRUCTIONS.md` | Step-by-step guide an agent follows to scaffold a new plugin from this template. |
 | `TEMPLATE_README.md` | Overview of the template, placeholder token reference table. |
 | `contributions/` | Per-plugin contribution files. Each plugin writes its discoveries here before they get merged into `LEARNINGS.md`. |
+| `ADOPTION-INSTRUCTIONS.md` | Exact instructions to add to **existing** plugins (not scaffolded from template) so their agents collaborate back automatically. Contains drop-in `.copilot-instructions.md` and `AGENTS.md` sections. |
 | `scaffold/` | Ready-to-use template files (package.json, tsconfig, rollup, vitest, manifest, example action, test, etc.) with `__PLACEHOLDER__` tokens. |
+| `scaffold/.github/AGENTS.md` | Agent instructions template — rules, patterns, common mistakes for new plugins. |
+| `scaffold/.github/TESTING-PROTOCOL.md` | Testing protocol template — test structure, mocking, coverage, pre-release process. |
+| `scaffold/.github/UI-DESIGN-GUIDE.md` | UI/UX design guide template — accent bar, SVG specs, colors, typography, marquee, PI. |
 
 ## Your Responsibilities as an Agent in This Workspace
 
@@ -72,6 +76,8 @@ If a new pattern is discovered that should be in every plugin from the start:
 - Update the relevant `scaffold/` file
 - Update `TEMPLATE_INSTRUCTIONS.md` if the scaffolding steps changed
 - Update `scaffold/.github/AGENTS.md` if agent rules changed
+- Update `scaffold/.github/TESTING-PROTOCOL.md` if testing patterns changed
+- Update `scaffold/.github/UI-DESIGN-GUIDE.md` if UI/UX patterns changed
 
 ## The Plugin Ecosystem
 

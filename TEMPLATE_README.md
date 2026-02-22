@@ -48,6 +48,10 @@ stream-deck-template/
 │   ├── vitest.config.ts
 │   ├── .gitignore
 │   ├── .copilot-instructions.md
+│   ├── .github/
+│   │   ├── AGENTS.md
+│   │   ├── TESTING-PROTOCOL.md
+│   │   └── UI-DESIGN-GUIDE.md
 │   ├── .sdignore
 │   ├── manifest.json
 │   ├── plugin.ts
@@ -59,8 +63,9 @@ stream-deck-template/
 │   │   └── example-action.ts
 │   └── tests/
 │       └── example-action.test.ts
+├── ADOPTION-INSTRUCTIONS.md     ← Instructions for adopting existing plugins
 └── .github/
-    └── AGENTS.md               ← Agent instructions template
+    └── AGENTS.md               ← Agent instructions for the template repo
 ```
 
 ## Cross-Plugin Collaboration

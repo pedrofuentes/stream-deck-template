@@ -12,6 +12,7 @@ A shared knowledge hub and project template for building Stream Deck plugins wit
 | [TEMPLATE_INSTRUCTIONS.md](TEMPLATE_INSTRUCTIONS.md) | Step-by-step scaffolding guide for AI agents to create a new plugin |
 | [TEMPLATE_README.md](TEMPLATE_README.md) | Detailed overview of the template, placeholder tokens, and file structure |
 | [COLLABORATION.md](COLLABORATION.md) | Cross-workspace agent collaboration protocol |
+| [ADOPTION-INSTRUCTIONS.md](ADOPTION-INSTRUCTIONS.md) | Instructions for adopting existing plugins into the collaboration ecosystem |
 | [scaffold/](scaffold/) | Ready-to-use template files with `__PLACEHOLDER__` tokens |
 | [contributions/](contributions/) | Per-plugin contribution files with discovery summaries |
 
@@ -23,13 +24,13 @@ A shared knowledge hub and project template for building Stream Deck plugins wit
    > *"Use TEMPLATE_INSTRUCTIONS.md to scaffold a new Stream Deck plugin called [your plugin name] with UUID [com.yourname.plugin-name]"*
 4. The agent will replace all placeholders, set up the project structure, and apply all known best practices
 
-## Built From This Template
+## Plugin Ecosystem
 
-| Plugin | Description |
-|---|---|
-| [stream-deck-github-utilities](https://github.com/pedrofuentes/stream-deck-github-utilities) | GitHub repo stats & workflow status |
-| [stream-deck-cloudflare-utilities](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities) | Cloudflare service monitoring |
-| [stream-deck-ical](https://github.com/pedrofuentes/stream-deck-ical) | Calendar event display |
+| Plugin | Origin | Description |
+|---|---|---|
+| [stream-deck-github-utilities](https://github.com/pedrofuentes/stream-deck-github-utilities) | Founding contributor | GitHub repo stats & workflow status |
+| [stream-deck-cloudflare-utilities](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities) | Founding contributor | Cloudflare service monitoring |
+| [stream-deck-ical](https://github.com/pedrofuentes/stream-deck-ical) | Founding contributor | Calendar event display |
 
 ## Key Learnings Covered
 

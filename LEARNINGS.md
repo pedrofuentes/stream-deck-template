@@ -369,6 +369,88 @@ Key requirements:
 - Include `<label>` with `<span></span>` inside (for the custom checkbox rendering)
 - `for` attribute must match `id`
 
+### FilterableSelect for Searchable PI Dropdowns
+
+*(Source: github-utilities)*
+
+When a dropdown has many options (repos, workflows, branches), the standard `<sdpi-select datasource>` becomes unusable. Replace with a reusable `FilterableSelect` combobox:
+
+```javascript
+// filterable-select.js — reusable custom combobox component
+class FilterableSelect {
+  constructor(containerId, options = {}) {
+    this.searchThreshold = options.searchThreshold ?? 8; // show search when items > threshold
+    this._buildDOM(containerId);
+    this._bindEvents();
+  }
+}
+```
+
+Key features:
+- **Search input** auto-shown when selectable items exceed threshold (default: 8)
+- **Keyboard navigation**: Arrow keys, Enter to select, Escape to close
+- **ARIA attributes** for accessibility (`role="combobox"`, `aria-expanded`, etc.)
+- **Portalled to `<body>`** — avoids `sdpi-item` shadow DOM clipping that traps dropdowns
+- **Uses `sdpi-datasource` CustomEvents** for decoupled data arrival (same events as native `<sdpi-select>`)
+- **Captures `actionInfo`** in WebSocket connection interceptor for settings persistence
+- **Static dropdowns unchanged** — only use FilterableSelect for dynamic/API-populated dropdowns
+
+### Custom Event for PI Settings Availability
+
+*(Source: github-utilities)*
+
+Custom PI components (like FilterableSelect) whose constructors run **before** `connectElgatoStreamDeckSocket` has loaded settings will find `_actionSettings` empty. The standard 3-layer token fallback doesn't help here because it fires too late for component initialization.
+
+**Solution**: Dispatch a custom event after settings are populated:
+
+```javascript
+// In the PI connection handler — after settings arrive
+function onConnected(actionInfo) {
+  _actionSettings = actionInfo.payload.settings;
+  document.dispatchEvent(new CustomEvent("sdpi-settings-loaded", {
+    detail: { settings: _actionSettings }
+  }));
+}
+
+// In FilterableSelect — listen for the custom event
+document.addEventListener("sdpi-settings-loaded", (e) => {
+  this._loadInitialValue(e.detail.settings);
+});
+```
+
+Also handle `didReceiveSettings` WebSocket events for live settings sync when multiple PI instances or key-press cycling update the same settings.
+
+### Viewport-Aware Dropdown Positioning
+
+*(Source: github-utilities)*
+
+The PI viewport is very small (~300px tall). Custom dropdowns that open downward can overflow off-screen. Measure available space and flip when necessary:
+
+```javascript
+_openDropdown() {
+  const triggerRect = this._trigger.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - triggerRect.bottom;
+  const spaceAbove = triggerRect.top;
+
+  if (spaceBelow < 120 && spaceAbove > spaceBelow) {
+    // Flip upward: use column-reverse so list appears above trigger
+    this._container.style.flexDirection = "column-reverse";
+    this._list.style.maxHeight = `${Math.min(spaceAbove - 10, 250)}px`;
+  } else {
+    this._container.style.flexDirection = "column";
+    this._list.style.maxHeight = `${Math.min(spaceBelow - 10, 250)}px`;
+  }
+}
+
+_closeDropdown() {
+  // Reset dynamic sizing for clean re-measurement on next open
+  this._container.style.flexDirection = "";
+  this._list.style.maxHeight = "";
+}
+```
+
+**Key rule**: 120px minimum usable height threshold — don't show a tiny unusable dropdown.
+
 ---
 
 ## 4. Action Implementation Patterns
@@ -612,6 +694,87 @@ private startDisplayRefresh(): void {
 
 Purely cosmetic — re-renders from cache, no API calls. Self-terminates when no longer needed.
 
+### Short Press / Long Press Detection
+
+*(Source: github-utilities)*
+
+Use `onKeyDown` to record timestamp and `onKeyUp` to measure press duration. This enables dual-purpose keys without additional UI:
+
+```typescript
+const LONG_PRESS_THRESHOLD_MS = 500;
+private keyDownTime: Map<string, number> = new Map();
+
+override async onKeyDown(ev: KeyDownEvent<MySettings>): Promise<void> {
+  this.keyDownTime.set(ev.action.id, Date.now());
+}
+
+override async onKeyUp(ev: KeyUpEvent<MySettings>): Promise<void> {
+  const downTime = this.keyDownTime.get(ev.action.id) ?? Date.now();
+  const pressDuration = Date.now() - downTime;
+  this.keyDownTime.delete(ev.action.id);
+
+  if (pressDuration >= LONG_PRESS_THRESHOLD_MS) {
+    // Long press — open URL in browser
+    await ev.action.openUrl(settings.url);
+  } else {
+    // Short press — cycle through stat types
+    const nextIndex = (currentIndex + 1) % STAT_TYPES.length;
+    await this.renderStat(ev, STAT_TYPES[nextIndex]);
+  }
+}
+```
+
+Use `openUrl()` from the SDK for browser navigation. Define `STAT_TYPES` as an ordered constant array for cycling. Store `keyDownTime` in a `Map<string, number>` keyed by `action.id` for multi-button support.
+
+### PollingCoordinator for Shared Polling Logic
+
+*(Source: cloudflare-utilities)*
+
+When multiple actions all implement polling with backoff, extract the logic into a reusable coordinator instead of duplicating it in each action:
+
+```typescript
+class PollingCoordinator {
+  private timers: Map<string, Timer> = new Map();
+  private errorCounts: Map<string, number> = new Map();
+
+  start(actionId: string, callback: () => Promise<void>, intervalMs: number): void {
+    this.stop(actionId);
+    this.timers.set(actionId, setInterval(async () => {
+      try {
+        await callback();
+        this.errorCounts.set(actionId, 0); // reset on success
+      } catch {
+        const count = (this.errorCounts.get(actionId) ?? 0) + 1;
+        this.errorCounts.set(actionId, count);
+        // exponential backoff: 2^count * base, capped
+      }
+    }, intervalMs));
+  }
+
+  stop(actionId: string): void {
+    const timer = this.timers.get(actionId);
+    if (timer) clearInterval(timer);
+    this.timers.delete(actionId);
+    this.errorCounts.delete(actionId);
+  }
+}
+```
+
+### Error Backoff Reset on Key Press
+
+*(Source: cloudflare-utilities)*
+
+When using exponential backoff on consecutive API errors, a key press should reset the backoff counter for immediate manual retry:
+
+```typescript
+override async onKeyDown(ev): Promise<void> {
+  this.pollingCoordinator.resetBackoff(ev.action.id);
+  await this.fetchAndRender(ev); // immediate retry
+}
+```
+
+Without this, after several errors, the user would have to wait minutes for the next automatic retry even though they've pressed the key to manually refresh.
+
 ### Thorough Cleanup on Disappear (CRITICAL)
 
 *(Source: cloudflare-utilities)*
@@ -755,6 +918,45 @@ private waitForCacheAndStart(actionId: string): void {
 }
 ```
 
+### Plugin Source / Release Directory Separation
+
+*(Source: cloudflare-utilities)*
+
+Separate hand-authored source assets from build output for cleaner project structure:
+
+```
+plugin/               # hand-authored assets (committed to git)
+├── manifest.json
+├── imgs/
+├── ui/               # PI HTML files
+└── .sdignore
+
+release/              # build output (gitignored)
+└── com.example.my-plugin.sdPlugin/
+    ├── manifest.json # copied from plugin/
+    ├── imgs/         # copied from plugin/
+    ├── ui/           # copied from plugin/
+    └── bin/          # compiled JS from Rollup
+```
+
+Rollup builds to `release/<plugin-id>.sdPlugin/` and a post-build step copies `plugin/` assets alongside the compiled JS. This prevents build artifacts from mixing with source files and keeps the git history clean.
+
+### Third-Party Status API Workarounds
+
+*(Source: cloudflare-utilities)*
+
+When querying third-party status pages, the direct domain (e.g., `cloudflarestatus.com`) may be behind CloudFront WAF that blocks automated requests with 403. Use the statuspage.io API endpoint instead:
+
+```typescript
+// ❌ Returns 403 from CloudFront WAF
+const BAD_URL = "https://www.cloudflarestatus.com/api/v2/summary.json";
+
+// ✅ Same data, no WAF blocking
+const GOOD_URL = "https://yh6f0r4529hb.statuspage.io/api/v2/summary.json";
+```
+
+This applies to any service using Atlassian Statuspage — look for the `<page-id>.statuspage.io` endpoint.
+
 ---
 
 ## 6. Testing Patterns
@@ -861,11 +1063,74 @@ __fixtures__/
 ```
 
 ### Release Checklist
-1. `npm test` — all tests pass
-2. `npm run build` — builds successfully
-3. `npm run validate` — manifest validates (0 errors)
-4. `streamdeck pack __PLUGIN_ID__.sdPlugin --output release/` — creates `.streamDeckPlugin`
-5. `gh release create v1.0.0 release/*.streamDeckPlugin --title "v1.0.0 - Title" --notes "..."` — GitHub release
+1. **Documentation & PI Verification** (see below) — verify PI HTML matches source code
+2. `npm run validate:consistency` — plugin consistency checks pass (if available)
+3. `npm test` — all tests pass
+4. `npm run build` — builds successfully
+5. `npm run validate` — manifest validates (0 errors)
+6. `streamdeck pack __PLUGIN_ID__.sdPlugin --output release/` — creates `.streamDeckPlugin`
+7. **User tests on physical device** — wait for explicit confirmation
+8. `gh release create v1.0.0 release/*.streamDeckPlugin --title "v1.0.0 - Title" --notes "..."` — GitHub release
+9. **Update ROADMAP.md** — mark the new version as shipped (mandatory post-release step)
+
+### Documentation & PI Verification Pre-Release Gate
+
+*(Source: github-utilities)*
+
+Before every release, verify that PI HTML files match the actual source code. This catches dropdown options that were added in code but not in the PI, or help text that became stale:
+
+**8-item checklist:**
+1. PI dropdown options match TypeScript type definitions (enum values, constant arrays)
+2. PI help text accurately describes current behavior
+3. PI labels match code constants and terminology
+4. README documents all features and options
+5. `setup.html` has correct guidance (e.g., token scopes, permissions)
+6. Manifest tooltips are accurate for all actions
+7. JSDoc comments match implementation
+8. PI default values match code defaults
+
+### Plugin Consistency Validator Script
+
+*(Source: cloudflare-utilities)*
+
+A custom `validate:consistency` script with 11 checks that runs in the `prepack` pipeline:
+
+```json
+{
+  "validate:consistency": "tsx scripts/validate-consistency.ts",
+  "prepack": "npm run validate && npm run validate:consistency"
+}
+```
+
+The 11 checks:
+1. Manifest parses without errors
+2. Every source file in `src/actions/` has a corresponding manifest entry
+3. Every action in manifest has a `registerAction()` call in `plugin.ts`
+4. `ShowTitle: false` is set in States where SVG rendering is used
+5. `UserTitleEnabled: false` is at the action level (not inside States)
+6. Every action in manifest has a corresponding PI HTML file
+7. Required icon files exist for each action
+8. State images exist for multi-state actions
+9. Every action has a corresponding test file
+10. README mentions every action
+11. `package.json` and manifest versions are in sync
+
+### .streamDeckPlugin Build Artifact
+
+*(Source: github-utilities)*
+
+The `.streamDeckPlugin` file is a build artifact — do **not** commit it to the repository. Add to `.gitignore`:
+
+```gitignore
+*.streamDeckPlugin
+release/
+```
+
+### Post-Release: Update Roadmap (Mandatory)
+
+*(Source: cloudflare-utilities)*
+
+After every release, update `ROADMAP.md` to mark the version as shipped. This is a mandatory step that must not be skipped — it keeps the roadmap accurate and helps track feature delivery over time.
 
 ### Icon Conversion
 Icons in the manifest must be **PNG, not SVG**. If you design SVGs, convert them before packaging:
@@ -934,6 +1199,26 @@ docs(readme): update installation instructions
 chore: prepare v1.0.0 release
 ```
 
+### Branch Naming Conventions (GitHub Flow)
+
+*(Source: cloudflare-utilities, github-utilities)*
+
+All repos use GitHub Flow: `main` is protected (never commit directly), all work happens on feature branches that merge via PR.
+
+**Branch prefixes:**
+
+| Prefix | Use Case |
+|---|---|
+| `feat/` | New features or actions |
+| `fix/` | Bug fixes |
+| `docs/` | Documentation changes |
+| `refactor/` | Code restructuring |
+| `test/` | Adding or updating tests |
+| `chore/` | Maintenance, dependency updates |
+| `release/` | Release preparation |
+
+Examples: `feat/worker-analytics-action`, `fix/rate-limit-handling`, `chore/bump-v1.2.0`
+
 ### README Badges
 ```markdown
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -965,3 +1250,9 @@ chore: prepare v1.0.0 release
 | `setSettings()` triggers `onDidReceiveSettings` | Double-render on key press cycling | Use a `pendingKeyCycle` flag to suppress echo |
 | Using runtime `process.env` in plugin | Variables undefined in bundled plugin | Use Rollup `@rollup/plugin-replace` at build time |
 | Colored action list icons | Look wrong in light/dark themes | Use monochrome white on transparent background |
+| Committing `.streamDeckPlugin` to repo | Bloats repo, stale artifacts | Add `*.streamDeckPlugin` and `release/` to `.gitignore` |
+| Using direct status API domains behind WAF | 403 from CloudFront WAF | Use `<page-id>.statuspage.io` API endpoint instead |
+| Custom dropdowns without viewport awareness | Dropdown overflows PI viewport | Measure space, flip with `column-reverse`, enforce 120px minimum |
+| Skipping PI verification before release | PI dropdowns/help text out of sync with code | Run 8-item Documentation & PI Verification checklist |
+| Custom PI components relying on constructor settings | Settings empty during DOM construction | Use `sdpi-settings-loaded` custom event for deferred initialization |
+| Committing directly to `main` | Breaks protected branch, skips review | Use feature branches with `feat/`/`fix/` prefixes |
