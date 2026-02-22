@@ -48,8 +48,8 @@ stream-deck-template/
 │   ├── vitest.config.ts
 │   ├── .gitignore
 │   ├── .copilot-instructions.md
+│   ├── AGENTS.md
 │   ├── .github/
-│   │   ├── AGENTS.md
 │   │   ├── TESTING-PROTOCOL.md
 │   │   └── UI-DESIGN-GUIDE.md
 │   ├── .sdignore

@@ -28,9 +28,9 @@ All scaffold files in this template use placeholder tokens. Replace them **every
 
 ```
 <project-root>/
-├── .copilot-instructions.md                    # Points to .github/AGENTS.md
+├── .copilot-instructions.md                    # Points to AGENTS.md
+├── AGENTS.md                                    # Agent instructions (customize from template)
 ├── .github/
-│   ├── AGENTS.md                               # Agent instructions (customize from template)
 │   ├── TESTING-PROTOCOL.md                     # Testing strategy, mocking, coverage, pre-release
 │   └── UI-DESIGN-GUIDE.md                      # UI/UX patterns, SVG specs, accent bar, colors
 ├── .gitignore

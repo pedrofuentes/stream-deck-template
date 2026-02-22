@@ -4,7 +4,7 @@
 
 ## Background
 
-The `scaffold/.github/AGENTS.md` already includes a "Contributing Learnings Back" section for new plugins created from this template. But some plugins predate the template and contributed to its creation. They need the same collaboration wiring.
+The `scaffold/AGENTS.md` already includes a "Contributing Learnings Back" section for new plugins created from this template. But some plugins predate the template and contributed to its creation. They need the same collaboration wiring.
 
 **Plugins that need adoption:**
 - `stream-deck-cloudflare-utilities` — contributed accent bar, color palette, polling, marquee, key-image renderer, validate:consistency

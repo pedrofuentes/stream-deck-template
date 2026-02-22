@@ -24,7 +24,7 @@ Its purpose is:
 | `contributions/` | Per-plugin contribution files. Each plugin writes its discoveries here before they get merged into `LEARNINGS.md`. |
 | `ADOPTION-INSTRUCTIONS.md` | Exact instructions to add to **existing** plugins (not scaffolded from template) so their agents collaborate back automatically. Contains drop-in `.copilot-instructions.md` and `AGENTS.md` sections. |
 | `scaffold/` | Ready-to-use template files (package.json, tsconfig, rollup, vitest, manifest, example action, test, etc.) with `__PLACEHOLDER__` tokens. |
-| `scaffold/.github/AGENTS.md` | Agent instructions template — rules, patterns, common mistakes for new plugins. |
+| `scaffold/AGENTS.md` | Agent instructions template — rules, patterns, common mistakes for new plugins. |
 | `scaffold/.github/TESTING-PROTOCOL.md` | Testing protocol template — test structure, mocking, coverage, pre-release process. |
 | `scaffold/.github/UI-DESIGN-GUIDE.md` | UI/UX design guide template — accent bar, SVG specs, colors, typography, marquee, PI. |
 
@@ -68,14 +68,14 @@ When asked to create a new plugin from the template:
 3. Copy `scaffold/` files to the new project directory
 4. Replace all `__PLACEHOLDER__` tokens (see `TEMPLATE_README.md` for the full list)
 5. Create a new `contributions/<plugin-slug>.md` file for the new plugin
-6. Set up `.github/AGENTS.md` in the new project with the contributing-back instructions
+6. Set up `AGENTS.md` in the new project root with the contributing-back instructions
 
 ### 4. Keeping the Scaffold Up to Date
 
 If a new pattern is discovered that should be in every plugin from the start:
 - Update the relevant `scaffold/` file
 - Update `TEMPLATE_INSTRUCTIONS.md` if the scaffolding steps changed
-- Update `scaffold/.github/AGENTS.md` if agent rules changed
+- Update `scaffold/AGENTS.md` if agent rules changed
 - Update `scaffold/.github/TESTING-PROTOCOL.md` if testing patterns changed
 - Update `scaffold/.github/UI-DESIGN-GUIDE.md` if UI/UX patterns changed
 
