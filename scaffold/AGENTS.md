@@ -21,6 +21,14 @@ src/
 tests/
   actions/           — Tests mirror src/actions/ structure
   utils/             — Tests for utility modules
+content/             — Elgato Marketplace content (see content/CONTENT-GUIDE.md)
+  CONTENT-GUIDE.md   — Agent instructions for marketplace content
+  description.md     — Plugin description (4,000 char limit)
+  release-notes.md   — Release notes per version (1,500 char limit each)
+  marketplace-content.html — Copy-paste ready HTML for WYSIWYG editor
+  assets/            — SVG sources + generated PNGs for marketplace
+scripts/
+  convert-content-assets.ts — SVG to PNG converter for marketplace assets
 ```
 
 ## Critical Rules
@@ -178,8 +186,9 @@ This project includes additional guides alongside this AGENTS.md:
 |-------|------|---------|
 | **Testing Protocol** | `.github/TESTING-PROTOCOL.md` | Test structure, mocking strategies, coverage requirements, pre-release protocol, common pitfalls |
 | **UI/UX Design Guide** | `.github/UI-DESIGN-GUIDE.md` | Accent bar pattern, SVG rendering specs, color palette, typography, marquee, PI components |
+| **Content Guide** | `content/CONTENT-GUIDE.md` | Elgato Marketplace content: asset specs, release notes templates, description management, marketplace upload procedure |
 
-**Read these guides** before writing tests or making UI changes. They contain hardware-tested patterns and failure logs that prevent repeating past mistakes.
+**Read these guides** before writing tests, making UI changes, or preparing a release. They contain hardware-tested patterns and failure logs that prevent repeating past mistakes.
 
 ## Commands
 
@@ -193,6 +202,7 @@ This project includes additional guides alongside this AGENTS.md:
 | Validate manifest  | `npx streamdeck validate`            |
 | Package plugin     | `npx streamdeck pack __PLUGIN_ID__.sdPlugin -o release/` |
 | Full SD restart    | `npm run streamdeck:restart`          |
+| Content PNGs       | `npm run content:assets`              |
 
 ## Git Conventions
 
@@ -220,6 +230,41 @@ This project includes additional guides alongside this AGENTS.md:
 | Colored action list icons | Look wrong in light/dark themes | Use monochrome white on transparent background |
 | `vi.mock()` without `vi.hoisted()` | Mock not applied | Use hoisted pattern |
 | Forgetting timer cleanup | Memory leak, stale updates | Clear **everything** in `onWillDisappear` |
+| Skipping marketplace content update on release | Stale listing, missing release notes on Elgato Marketplace | Follow post-release content checklist in `content/CONTENT-GUIDE.md` |
+| Pasting markdown into Elgato WYSIWYG editor | Unformatted text, lost formatting | Use `marketplace-content.html` copy-paste approach |
+
+## Pre-Release Checklist
+
+Agents MUST complete every step before tagging and releasing:
+
+### Automated checks
+1. `npm test` — all tests pass
+2. `npm run lint` — no TypeScript errors
+3. `npm run validate:consistency` — actions/manifest/PI/icons/tests/docs in sync (if available)
+4. `npm run build` — successful build
+5. `npm run validate` — Stream Deck CLI schema validation passes
+
+### Manual device test
+6. **ASK the user** to test on their physical Stream Deck before proceeding
+7. **Wait for explicit user confirmation** before version bump / tag / release
+
+### Release flow (after user confirms)
+8. Version bump: edit `package.json` + `manifest.json` (4-part: `x.y.z.0`)
+9. `git tag vx.y.z && git push origin main --tags`
+10. `npm run pack` → produces `.streamDeckPlugin` file
+11. Create GitHub Release with `.streamDeckPlugin` attached
+
+### Post-release — Elgato Marketplace Content (MANDATORY)
+12. Write release notes in `content/release-notes.md`
+13. Review `content/description.md` — update if features changed
+14. Update `content/marketplace-content.html` with matching HTML
+15. Update gallery SVGs in `content/assets/` if key display changed
+16. Run `npm run content:assets` to regenerate PNGs from SVGs
+17. Commit content changes
+18. After GitHub Release: open `marketplace-content.html` in browser, copy, paste into Elgato Marketplace WYSIWYG
+19. After GitHub Release: upload new asset PNGs to Elgato Marketplace (if changed)
+
+**See `content/CONTENT-GUIDE.md`** for full details on content management.
 
 ## Contributing Learnings Back to the Template
 

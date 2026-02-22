@@ -8,7 +8,7 @@
 - **Source files**: 14+ TypeScript files
 - **Actions**: 4 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics)
 - **Services**: 6+ (cloudflare-api-client, cloudflare-workers-api, cloudflare-ai-gateway-api, global-settings-store, key-image-renderer, marquee-controller)
-- **Release**: v1.1.1
+- **Release**: v1.1.3
 
 ## Key Topics Contributed
 - Accent bar pattern for status indication
@@ -41,3 +41,12 @@
 - Post-release roadmap update — mandatory step after every release
 - FilterableSelect searchable dropdown component added to all PIs
 - Branch naming conventions — `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `chore/`
+
+### v1.1.2 / v1.1.3 Contributions (merged February 22, 2026)
+- Elgato Marketplace content pipeline — `content/` folder with CONTENT-GUIDE.md, description.md, release-notes.md, marketplace-content.html, SVG assets, and PNG generation
+- WYSIWYG copy-paste HTML approach — solves the Elgato Marketplace WYSIWYG editor limitation
+- `content:assets` npm script — SVG to PNG conversion using `@resvg/resvg-js`
+- Gallery image design guidelines — Stream Deck dark theme mockup patterns
+- SETUP-PROMPT.md — one-shot prompt to bootstrap marketplace content for any new plugin
+- Post-release marketplace content update — mandatory step in release checklist
+- Release notes and description character limit management

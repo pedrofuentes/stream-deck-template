@@ -55,6 +55,18 @@ All scaffold files in this template use placeholder tokens. Replace them **every
 │   │   └── <action-name>.test.ts
 │   └── utils/
 │       └── button-renderer.test.ts
+├── content/                                     # Elgato Marketplace content
+│   ├── CONTENT-GUIDE.md                        # Agent instructions for marketplace
+│   ├── SETUP-PROMPT.md                         # One-shot prompt to bootstrap content
+│   ├── description.md                          # Plugin description (≤4,000 chars)
+│   ├── release-notes.md                        # Release notes per version (≤1,500 chars)
+│   ├── marketplace-content.html                # Copy-paste HTML for WYSIWYG editor
+│   └── assets/                                 # SVG sources + generated PNGs
+│       ├── icon.svg / icon.png                 # 288×288
+│       ├── thumbnail.svg / thumbnail.png       # 1920×960
+│       └── gallery-*.svg / gallery-*.png       # 1920×960, min 3
+├── scripts/
+│   └── convert-content-assets.ts               # SVG → PNG converter
 └── __PLUGIN_ID__.sdPlugin/
     ├── manifest.json
     ├── .sdignore
@@ -78,7 +90,8 @@ All scaffold files in this template use placeholder tokens. Replace them **every
 npm install @elgato/streamdeck
 npm install -D rollup @rollup/plugin-typescript @rollup/plugin-node-resolve \
     typescript tslib @types/node vitest @vitest/coverage-v8 \
-    eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser
+    eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser \
+    @resvg/resvg-js tsx
 ```
 
 ## Step 4: Core Implementation Patterns
@@ -183,7 +196,21 @@ vi.mock("@elgato/streamdeck", () => ({
 3. Create GitHub release: `gh release create v1.0.0 release/*.streamDeckPlugin`
 4. Update README badges (version, test count, license)
 
-## Step 7: Contributing Learnings Back
+## Step 7: Elgato Marketplace Content
+
+Every release must include marketplace content updates. The `content/` folder (already part of the scaffold) manages this:
+
+1. **First time setup**: Use the prompt in `content/SETUP-PROMPT.md` to have an agent create all marketplace content (description, release notes, gallery SVGs, HTML copy-paste file)
+2. **Every release**: Follow the checklist in `content/CONTENT-GUIDE.md`:
+   - Write release notes in `content/release-notes.md`
+   - Review and update `content/description.md` if features changed
+   - Update `content/marketplace-content.html` with matching HTML
+   - Update gallery SVGs if key display changed
+   - Run `npm run content:assets` to regenerate PNGs from SVGs
+   - After GitHub Release: open `marketplace-content.html` in browser, copy, paste into Elgato Marketplace WYSIWYG
+3. **Key rule**: Markdown files are the source of truth for text; SVGs are the source of truth for images. The HTML file and PNGs are generated/derived artifacts.
+
+## Step 8: Contributing Learnings Back
 
 This plugin was scaffolded from https://github.com/pedrofuentes/stream-deck-template. As you build, **periodically contribute new learnings back** so future plugins benefit:
 
@@ -206,3 +233,4 @@ Good moments to contribute: after solving a hardware quirk, implementing a reusa
 9. **File headers** on every `.ts` file with `@author`, `@copyright`, `@license`
 10. **Conventional commits**: `feat`, `fix`, `docs`, `test`, `chore`, etc.
 11. **Contribute learnings** back to the template repo after significant discoveries
+12. **Update marketplace content** with every release — follow `content/CONTENT-GUIDE.md`

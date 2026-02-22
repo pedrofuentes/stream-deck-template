@@ -11,3 +11,5 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+# Content PNGs are generated from SVGs — regenerate with: npm run content:assets
+content/assets/*.png

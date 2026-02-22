@@ -41,6 +41,7 @@ A shared knowledge hub and project template for building Stream Deck plugins wit
 - **Architecture** — global settings pub/sub, service layer isolation, resource managers
 - **Testing** — SDK mocking, SVG assertions, fake timers, singleton store resets
 - **Build & release** — Rollup config, debug mode, packaging, validation
+- **Elgato Marketplace content** — WYSIWYG copy-paste pipeline, asset requirements, release notes/description management, SVG-to-PNG conversion
 
 ## License
 

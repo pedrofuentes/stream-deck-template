@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__PLUGIN_NAME__ — Marketplace Content (Copy-Paste Ready)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 40px; max-width: 900px; margin: 0 auto; }
+    h1.page-title { color: #60a5fa; border-bottom: 2px solid #2d2d44; padding-bottom: 12px; }
+    .instructions { background: #2d2d44; border-radius: 8px; padding: 16px 20px; margin-bottom: 32px; font-size: 14px; line-height: 1.6; }
+    .instructions code { background: #0d1117; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    .copy-section { background: #0d1117; border: 1px solid #2d2d44; border-radius: 12px; padding: 32px; margin-bottom: 40px; }
+    .copy-section h2.section-label { color: #60a5fa; margin-top: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; }
+    .char-count { color: #9ca3af; font-size: 13px; text-align: right; margin-top: 12px; border-top: 1px solid #2d2d44; padding-top: 8px; }
+    /* The actual content to copy — styled to match WYSIWYG output */
+    .content { color: #222; background: #ffffff; padding: 24px; border-radius: 8px; font-size: 15px; line-height: 1.7; }
+    .content h2 { font-size: 18px; margin-top: 24px; margin-bottom: 8px; }
+    .content h3 { font-size: 16px; margin-top: 16px; margin-bottom: 6px; }
+    .content ul, .content ol { padding-left: 24px; }
+    .content li { margin-bottom: 4px; }
+    .tab-bar { display: flex; gap: 0; margin-bottom: 0; }
+    .tab { padding: 10px 24px; cursor: pointer; background: #161b22; color: #9ca3af; border: 1px solid #2d2d44; border-bottom: none; border-radius: 8px 8px 0 0; font-size: 14px; font-weight: 600; }
+    .tab.active { background: #0d1117; color: #60a5fa; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+
+<h1 class="page-title">Elgato Marketplace Content</h1>
+
+<div class="instructions">
+  <strong>How to use:</strong> Click inside a white content box below, press <code>Ctrl+A</code> to select all text in that box, then <code>Ctrl+C</code> to copy. Paste directly into the Elgato Marketplace WYSIWYG editor — all formatting (bold, lists, etc.) will transfer automatically.
+</div>
+
+<!-- ============================================================ -->
+<!-- DESCRIPTION -->
+<!-- ============================================================ -->
+<div class="copy-section">
+  <h2 class="section-label">Description (max 4,000 characters)</h2>
+  <div class="content" id="description">
+
+<p><b>__PLUGIN_NAME__</b> — [one-line tagline].</p>
+
+<p>[Summary paragraph — what the plugin does and why it's valuable.]</p>
+
+<h2>🔥 [N] Powerful Actions</h2>
+
+<h3>[Action 1 Name]</h3>
+<p>[Description of action 1.]</p>
+
+<h3>[Action 2 Name]</h3>
+<p>[Description of action 2.]</p>
+
+<h2>✨ Built for Your Workflow</h2>
+<ul>
+  <li><b>[Feature 1]</b> — [Description]</li>
+  <li><b>[Feature 2]</b> — [Description]</li>
+  <li><b>OLED-optimized</b> — High-contrast dark theme with color-coded accent bars designed specifically for Stream Deck displays.</li>
+  <li><b>Press to refresh</b> — Any key can be pressed for an instant update.</li>
+</ul>
+
+<h2>🔒 Privacy First</h2>
+<p>Your API credentials never leave your machine. They're stored locally in Stream Deck's global settings — no cloud sync, no telemetry, no third-party servers.</p>
+
+<h2>🛠 Requirements</h2>
+<ul>
+  <li>Stream Deck software v6.9+</li>
+  <li>[Additional requirements]</li>
+  <li>Works on Windows 10+ and macOS 13+</li>
+</ul>
+
+<h2>🚀 Getting Started</h2>
+<ol>
+  <li>Install the plugin from the Stream Deck Store</li>
+  <li>Drag any action onto a key</li>
+  <li>[Setup step]</li>
+  <li>[Final step]</li>
+</ol>
+
+<p>Open source and community-driven. Contributions welcome on GitHub.</p>
+
+  </div>
+  <div class="char-count" id="desc-count"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- RELEASE NOTES -->
+<!-- ============================================================ -->
+<div class="copy-section">
+  <h2 class="section-label">Release Notes (max 1,500 characters each) — copy the version you need</h2>
+
+  <div class="tab-bar">
+    <div class="tab active" onclick="showTab('v100')">v1.0.0</div>
+  </div>
+
+  <!-- v1.0.0 -->
+  <div class="tab-content active" id="tab-v100">
+    <div class="content">
+
+<p><b>Initial release</b></p>
+<p><b>__PLUGIN_NAME__</b> brings [brief description] to your Stream Deck!</p>
+<ul>
+  <li><b>[Action 1]</b> — [What it does]</li>
+  <li><b>[Action 2]</b> — [What it does]</li>
+  <li><b>[Feature 1]</b> — [Description]</li>
+</ul>
+
+    </div>
+    <div class="char-count" id="count-v100"></div>
+  </div>
+
+</div>
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  event.target.classList.add('active');
+  updateCounts();
+}
+
+function countChars(el) {
+  return el.innerText.trim().length;
+}
+
+function updateCounts() {
+  const desc = document.getElementById('description');
+  const descCount = document.getElementById('desc-count');
+  if (desc && descCount) {
+    const len = countChars(desc);
+    descCount.textContent = len + ' / 4,000 characters' + (len > 4000 ? ' ⚠️ OVER LIMIT' : '');
+  }
+
+  document.querySelectorAll('.tab-content').forEach(tab => {
+    const content = tab.querySelector('.content');
+    const counter = tab.querySelector('.char-count');
+    if (content && counter) {
+      const len = countChars(content);
+      counter.textContent = len + ' / 1,500 characters' + (len > 1500 ? ' ⚠️ OVER LIMIT' : '');
+    }
+  });
+}
+
+updateCounts();
+</script>
+
+</body>
+</html>

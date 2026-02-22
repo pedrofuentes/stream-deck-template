@@ -1072,6 +1072,7 @@ __fixtures__/
 7. **User tests on physical device** — wait for explicit confirmation
 8. `gh release create v1.0.0 release/*.streamDeckPlugin --title "v1.0.0 - Title" --notes "..."` — GitHub release
 9. **Update ROADMAP.md** — mark the new version as shipped (mandatory post-release step)
+10. **Update Elgato Marketplace Content** — see "Elgato Marketplace Content Pipeline" section below
 
 ### Documentation & PI Verification Pre-Release Gate
 
@@ -1173,7 +1174,141 @@ $env:STREAMDECK_DEBUG = "0"; npm run build
 
 ---
 
-## 8. File Header Convention
+## 8. Elgato Marketplace Content Pipeline
+
+*(Source: cloudflare-utilities)*
+
+Every Stream Deck plugin published to the Elgato Marketplace needs a structured content pipeline. The Elgato Marketplace developer portal uses a **WYSIWYG editor** — markdown doesn't paste correctly. This section describes the content system that solves this.
+
+### Content Directory Structure
+
+```
+content/
+├── CONTENT-GUIDE.md          # Agent instructions for marketplace content
+├── SETUP-PROMPT.md           # One-shot prompt to bootstrap the content/ folder for a new plugin
+├── description.md            # Plugin description (4,000 char limit) — source of truth
+├── release-notes.md          # Release notes per version (1,500 char limit each) — source of truth
+├── marketplace-content.html  # Copy-paste ready HTML — open in browser, copy, paste into WYSIWYG
+└── assets/
+    ├── icon.svg              # Source SVG for marketplace icon
+    ├── icon.png              # Generated PNG (288×288, ≤2 MB)
+    ├── thumbnail.svg         # Source SVG for marketplace thumbnail
+    ├── thumbnail.png         # Generated PNG (1920×960, ≤5 MB)
+    ├── gallery-1-*.svg       # Source SVG for gallery image 1
+    ├── gallery-1-*.png       # Generated PNG (1920×960, ≤10 MB)
+    ├── gallery-2-*.svg       # Gallery image 2 (minimum 3 required)
+    ├── gallery-3-*.svg       # Gallery image 3
+    └── ...
+```
+
+### Elgato Marketplace Asset Requirements
+
+| Asset | Format | Size Limit | Dimensions | Count |
+|---|---|---|---|---|
+| Icon | PNG or JPG | 2 MB | 288×288 (1:1) | 1 |
+| Thumbnail | PNG or JPG | 5 MB | 1920×960 (2:1) | 1 |
+| Gallery | PNG/JPG ≤10 MB or MP4 ≤50 MB | see format | 1920×960 (PNG) or 1920×1080 (MP4) | Min 3 |
+| Description | Plain text | 4,000 chars | — | 1 |
+| Release Notes | Plain text | 1,500 chars | — | 1 per version |
+
+### Source of Truth
+
+- **Markdown files** (`description.md`, `release-notes.md`) are the source of truth for text content
+- **SVG files** are the source of truth for images — PNGs are generated from SVGs
+- **`marketplace-content.html`** must be kept in sync manually with the markdown files
+
+### The WYSIWYG Copy-Paste Problem
+
+The Elgato Marketplace developer portal provides only a WYSIWYG rich-text editor (no markdown support). Pasting markdown results in unformatted text. The solution:
+
+1. Maintain source-of-truth text in markdown (easy to diff, review, and edit)
+2. Generate an HTML file (`marketplace-content.html`) with styled, copy-paste-ready content
+3. User opens the HTML in a browser, clicks inside the white content box, `Ctrl+A` → `Ctrl+C` → paste into WYSIWYG
+4. Formatting (bold, lists, headings) transfers automatically
+
+The HTML file contains:
+- The full description as formatted HTML
+- Tabbed release notes per version (JavaScript tabs, newest first)
+- Live character counters for description and each release note
+- White content boxes on dark background (content boxes must be white so copied text has proper formatting)
+- Instructions at the top explaining usage
+
+### SVG to PNG Conversion Script
+
+Use `@resvg/resvg-js` (dev dependency) for high-quality SVG → PNG conversion:
+
+```typescript
+// scripts/convert-content-assets.ts
+import { Resvg } from "@resvg/resvg-js";
+import { readFileSync, writeFileSync, readdirSync } from "fs";
+import { join, basename, extname } from "path";
+
+const ASSETS_DIR = join(import.meta.dirname, "..", "content", "assets");
+const files = readdirSync(ASSETS_DIR).filter((f) => f.endsWith(".svg"));
+
+for (const file of files) {
+  const svg = readFileSync(join(ASSETS_DIR, file), "utf-8");
+  const resvg = new Resvg(svg, { fitTo: { mode: "original" }, font: { loadSystemFonts: true } });
+  const pngData = resvg.render();
+  writeFileSync(join(ASSETS_DIR, basename(file, extname(file)) + ".png"), pngData.asPng());
+}
+```
+
+npm script: `"content:assets": "npx tsx scripts/convert-content-assets.ts"`
+
+### Release Notes Rules
+
+- **Max 1,500 characters** per release
+- Plain text (no markdown rendering on Elgato Marketplace)
+- Lead with the most impactful change
+- Use bullet points (`•` character) for lists  
+- Include version number and date as header
+- Keep it user-facing — skip internal refactors unless they affect behavior
+- Include: new features, bug fixes, UX improvements, breaking changes
+- Exclude: internal refactors, test improvements, docs-only changes, dependency updates
+
+### Description Rules
+
+- **Max 4,000 characters**
+- Use emoji headings for visual structure (they render on the marketplace)
+- Sections: Features (per action), workflow highlights, privacy, requirements, getting started
+- Tone: Marketing/enthusiastic — highlight value propositions, use action words
+- Update whenever new actions or features are added
+
+### Post-Release Marketplace Content Update (MANDATORY)
+
+After every release, as part of the release checklist:
+
+1. Write release notes in `content/release-notes.md`
+2. Review `content/description.md` — update if features changed
+3. Update `content/marketplace-content.html` with matching HTML content
+4. Update gallery SVGs in `content/assets/` if key display changed
+5. Run `npm run content:assets` to regenerate PNGs from SVGs
+6. Verify PNG file sizes are within limits
+7. Commit content changes with the version bump
+8. After GitHub Release: open `marketplace-content.html` in browser, copy content, paste into Elgato Marketplace WYSIWYG
+9. After GitHub Release: upload new asset PNGs to Elgato Marketplace (if changed)
+
+### Gallery Image Design Guidelines
+
+Gallery SVG mockups follow the Stream Deck dark theme:
+
+| Element | Value |
+|---|---|
+| Background | `#0d1117` to `#161b22` gradient |
+| Text primary | `#ffffff` |
+| Text secondary | `#9ca3af` |
+| Key background | `#0d1117` with `#2d2d44` border |
+| Key corner radius | 16–20px |
+| Accent bar | 6–8px, full width, 3px corner radius |
+| Font (UI text) | `Segoe UI` |
+| Font (key display) | `Arial` |
+
+**Do NOT use copyrighted logos** in marketplace assets. Use original artwork only.
+
+---
+
+## 9. File Header Convention
 
 Every `.ts` file must have this header:
 ```typescript
@@ -1188,7 +1323,7 @@ Every `.ts` file must have this header:
 
 ---
 
-## 9. Git & Repository Standards
+## 10. Git & Repository Standards
 
 ### Conventional Commits
 ```
@@ -1228,7 +1363,7 @@ Examples: `feat/worker-analytics-action`, `fix/rate-limit-handling`, `chore/bump
 
 ---
 
-## 10. Common Mistakes to Avoid
+## 11. Common Mistakes to Avoid
 
 | Mistake | Consequence | Fix |
 |---|---|---|
@@ -1256,3 +1391,5 @@ Examples: `feat/worker-analytics-action`, `fix/rate-limit-handling`, `chore/bump
 | Skipping PI verification before release | PI dropdowns/help text out of sync with code | Run 8-item Documentation & PI Verification checklist |
 | Custom PI components relying on constructor settings | Settings empty during DOM construction | Use `sdpi-settings-loaded` custom event for deferred initialization |
 | Committing directly to `main` | Breaks protected branch, skips review | Use feature branches with `feat/`/`fix/` prefixes |
+| Skipping marketplace content update on release | Stale listing, missing release notes on Elgato Marketplace | Run the Post-Release Marketplace Content Update checklist |
+| Pasting markdown into Elgato WYSIWYG editor | Unformatted text, lost formatting | Use `marketplace-content.html` copy-paste approach |
