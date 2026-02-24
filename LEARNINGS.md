@@ -451,6 +451,78 @@ _closeDropdown() {
 
 **Key rule**: 120px minimum usable height threshold — don't show a tiny unusable dropdown.
 
+### WebSocket Send Interceptor for Mixed PI Components (CRITICAL)
+
+*(Source: github-utilities v1.3.3)*
+
+When a PI uses both `sdpi-components` (for static dropdowns) and custom components like `FilterableSelect` (for dynamic dropdowns), `sdpi-components` sends `setSettings` with **only its own fields**, silently overwriting settings from custom components.
+
+**Solution**: Intercept `WebSocket.send()` and merge all settings into every outgoing `setSettings`:
+
+```javascript
+(function() {
+    const NativeWS = window.WebSocket;
+    let _lastSendTime = 0;
+    const ECHO_WINDOW_MS = 500;
+    window.WebSocket = new Proxy(NativeWS, {
+        construct(target, args) {
+            const ws = new target(...args);
+            window._sdWebSocket = ws;
+            const _origSend = ws.send.bind(ws);
+            ws.send = function(data) {
+                try {
+                    const msg = JSON.parse(data);
+                    if (msg.event === "setSettings" && window._actionSettings) {
+                        msg.payload = Object.assign({}, window._actionSettings, msg.payload);
+                        window._actionSettings = msg.payload;
+                        _lastSendTime = Date.now();
+                        return _origSend(JSON.stringify(msg));
+                    }
+                } catch(e) {}
+                return _origSend(data);
+            };
+            ws.addEventListener("message", function(evt) {
+                try {
+                    const data = JSON.parse(evt.data);
+                    if (data.event === "didReceiveSettings") {
+                        // Suppress echoes — stale data can overwrite pending changes
+                        const isEcho = (Date.now() - _lastSendTime) < ECHO_WINDOW_MS;
+                        if (!isEcho) {
+                            window._actionSettings = data.payload?.settings || {};
+                        }
+                        window.dispatchEvent(new CustomEvent('sdpi-settings-loaded', {
+                            detail: { settings: data.payload?.settings || {} }
+                        }));
+                    }
+                } catch(e) {}
+            });
+            return ws;
+        }
+    });
+})();
+```
+
+**Critical rules**:
+- The Proxy **must** be set up BEFORE `sdpi-components.js` loads (it creates the WebSocket)
+- `Object.assign({}, _actionSettings, msg.payload)` — cached settings as base, incoming payload wins for its fields
+- Echo suppression (500ms window) is **mandatory** — without it, stale `didReceiveSettings` echoes overwrite `_actionSettings` during sdpi-components' 250ms debounce, reverting the user's dropdown change
+- The `sdpi-settings-loaded` event must still fire for echoes (so FilterableSelect stays in sync), even though `_actionSettings` isn't updated
+
+### PI-Side Default Injection (Avoid Plugin Echo Races)
+
+*(Source: github-utilities v1.3.3)*
+
+When the plugin detects missing defaults and calls `setSettings()` to persist them, the resulting echo races with `sdpi-components`' debounce. **Inject defaults in the PI send interceptor instead**:
+
+```javascript
+// Inside the send interceptor:
+if (msg.payload.repo && !msg.payload.statType) {
+    msg.payload.statType = "stars";  // inject default before sending
+}
+```
+
+**Rule**: The plugin may apply defaults in-memory (safety fallback) but must **never call `setSettings()` to persist defaults**. Any plugin-initiated `setSettings` creates an echo that races with the user's next PI interaction.
+
 ---
 
 ## 4. Action Implementation Patterns
@@ -675,6 +747,49 @@ override async onDidReceiveSettings(ev): Promise<void> {
   // ... normal settings change flow
 }
 ```
+
+### Cached Settings + recentSetSettings Guard for Multi-Button Cycling
+
+*(Source: github-utilities v1.3.3)*
+
+The `pendingKeyCycle` boolean flag (above) works for single-button actions but breaks when multiple buttons exist — one button's flag can mask another's state. Also, `ev.payload.settings` in `onKeyUp` can contain stale/partial data when `sdpi-components` sent a partial `setSettings`.
+
+**Solution**: Use a `Map<string, Settings>` cache as source of truth, and a `Set<string>` guard instead of a boolean:
+
+```typescript
+private actionSettings = new Map<string, MySettings>();
+private recentSetSettings = new Set<string>();
+
+override async onKeyUp(ev: KeyUpEvent<MySettings>): Promise<void> {
+  // Prefer cached settings — event payload may be stale
+  const cached = this.actionSettings.get(ev.action.id);
+  const currentType = cached?.statType ?? ev.payload.settings.statType ?? "stars";
+  const nextType = STAT_TYPES[(STAT_TYPES.indexOf(currentType) + 1) % STAT_TYPES.length];
+
+  const newSettings = { ...ev.payload.settings, ...cached, statType: nextType };
+  this.recentSetSettings.add(ev.action.id);   // guard
+  await ev.action.setSettings(newSettings);
+  this.actionSettings.set(ev.action.id, newSettings);
+  await this.refreshDisplay(ev.action.id);
+}
+
+override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<MySettings>): Promise<void> {
+  if (this.recentSetSettings.delete(ev.action.id)) {
+    this.actionSettings.set(ev.action.id, ev.payload.settings);
+    return; // Skip redundant refresh — already handled in onKeyUp
+  }
+  // Merge incoming with cached to protect against partial updates
+  const cached = this.actionSettings.get(ev.action.id);
+  const settings = { ...cached, ...ev.payload.settings };
+  this.actionSettings.set(ev.action.id, settings);
+  await this.refreshDisplay(ev.action.id);
+}
+```
+
+**Key advantages over boolean flag**:
+- `Set<string>` supports multiple concurrent buttons (keyed by action ID)
+- `Set.delete()` returns boolean — clean one-shot guard pattern
+- Merge `{ ...cached, ...incoming }` protects against partial `setSettings` from PI
 
 ### Real-Time Seconds Display
 
@@ -1393,3 +1508,8 @@ Examples: `feat/worker-analytics-action`, `fix/rate-limit-handling`, `chore/bump
 | Committing directly to `main` | Breaks protected branch, skips review | Use feature branches with `feat/`/`fix/` prefixes |
 | Skipping marketplace content update on release | Stale listing, missing release notes on Elgato Marketplace | Run the Post-Release Marketplace Content Update checklist |
 | Pasting markdown into Elgato WYSIWYG editor | Unformatted text, lost formatting | Use `marketplace-content.html` copy-paste approach |
+| Mixing sdpi-components with custom PI components | sdpi-components overwrites custom component settings via `setSettings` | Use WebSocket send interceptor to merge `_actionSettings` into every outgoing `setSettings` |
+| Not suppressing `didReceiveSettings` echoes in PI | Stale echo reverts user's dropdown change during debounce window | Track `_lastSendTime`, skip `_actionSettings` update for echoes within 500ms |
+| Plugin calling `setSettings()` to persist defaults | Echo races with PI debounce, reverts user's next change | Inject defaults in PI send interceptor, not in plugin |
+| Using `pendingKeyCycle` boolean for multi-button | One button's flag masks another's echo | Use `Set<string>` keyed by `action.id` with `delete()` one-shot guard |
+| Trusting `ev.payload.settings` in `onKeyUp` | Settings may be stale/partial from sdpi-components' partial `setSettings` | Use per-action `Map<string, Settings>` cache as source of truth |
