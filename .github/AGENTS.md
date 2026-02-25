@@ -30,6 +30,23 @@ Its purpose is:
 
 ## Your Responsibilities as an Agent in This Workspace
 
+### 0. Check GitHub for New Learnings (ALWAYS)
+
+Before doing any work in this workspace, **always check the GitHub repo for new commits** that may contain learnings contributed by agents in other workspaces:
+
+```
+git fetch origin
+git log --oneline origin/main..HEAD   # see if remote is ahead
+git log --oneline HEAD..origin/main   # see what's new on remote
+```
+
+If the remote has new commits, pull them before proceeding:
+```
+git pull --rebase origin main
+```
+
+Other plugin agents push contributions directly to this repo. If you don't check, you'll miss new learnings and risk merge conflicts. **This is your first step every time.**
+
 ### 1. Merging Contributions
 
 When the user asks you to merge contributions, follow this process:

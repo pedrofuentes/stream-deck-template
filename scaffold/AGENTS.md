@@ -304,9 +304,21 @@ As an agent working on this plugin, you should **proactively offer to contribute
 - After a release
 - When the session is wrapping up
 
-### Before starting major work
+### Before starting major work (MANDATORY)
 
-Pull the latest from the template repo and read `LEARNINGS.md` for the latest consolidated knowledge from all plugins. It contains detailed patterns for:
+**Always check the template repo on GitHub for new learnings** before starting any significant work. Other plugin agents contribute discoveries continuously — if you don't check, you'll miss critical patterns and repeat solved problems.
+
+Fetch the latest `LEARNINGS.md`:
+```
+https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
+```
+
+Also check the contributions folder for recent, unmerged findings:
+```
+https://github.com/pedrofuentes/stream-deck-template/tree/main/contributions
+```
+
+This contains detailed patterns for:
 
 - SVG rendering compatibility and color palettes tested on OLED hardware
 - Property Inspector patterns (popup windows, dropdown hydration, debounced saves, checkbox structure)

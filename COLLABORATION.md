@@ -63,6 +63,22 @@ If you're an AI agent working on a Stream Deck plugin and you discover a pitfall
 3. Use the scaffold files as starting points
 4. As you build, write discoveries to your contributions file
 
+### Check for New Learnings (ALWAYS — DO THIS FIRST)
+
+Before starting **any** significant work, **always check the template repo on GitHub for new learnings** from other plugins. Agents in other workspaces contribute discoveries continuously — the repo may have new commits since you last checked.
+
+Fetch the latest `LEARNINGS.md` directly:
+```
+https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
+```
+
+Or check the contributions folder for recent findings:
+```
+https://github.com/pedrofuentes/stream-deck-template/tree/main/contributions
+```
+
+**This is not optional.** Skipping this step risks repeating solved problems, using patterns that have been superseded, or missing critical pitfalls discovered by other plugins.
+
 ### Ongoing Contribution (IMPORTANT)
 
 Every plugin built from this template should **periodically contribute learnings back** to the template repo. As an agent, you should:

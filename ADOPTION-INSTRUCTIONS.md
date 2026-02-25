@@ -42,18 +42,23 @@ https://github.com/pedrofuentes/stream-deck-template
 The template repo collects learnings from all Stream Deck plugins. This plugin's
 contribution tracking file lives at `contributions/<PLUGIN_SLUG>.md` in that repo.
 
-### Before Starting Major Work
+### Before Starting ANY Significant Work (MANDATORY)
 
-Read the template's `LEARNINGS.md` for the latest consolidated knowledge from all plugins.
-It contains hard-won solutions for SVG rendering, manifest quirks, PI patterns, polling,
-testing, and more — discovered across multiple plugin projects.
+**Always check the template repo on GitHub for new learnings first.** Other plugin agents
+contribute discoveries continuously — the repo may have new commits since your last session.
+Skipping this risks repeating solved problems or missing critical pitfalls.
 
-Fetch it directly:
+Fetch the latest `LEARNINGS.md`:
 ```
 https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
 ```
 
-Also check the companion guides for testing and UI:
+Also check the contributions folder for recent, unmerged findings:
+```
+https://github.com/pedrofuentes/stream-deck-template/tree/main/contributions
+```
+
+And check the companion guides for testing and UI:
 ```
 https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/TESTING-PROTOCOL.md
 https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/UI-DESIGN-GUIDE.md
@@ -95,6 +100,22 @@ Learnings discovered here benefit every other plugin.
 - **Template repo**: https://github.com/pedrofuentes/stream-deck-template
 - **This plugin's contributions**: `contributions/<PLUGIN_SLUG>.md` in the template repo
 - **Consolidated knowledge**: `LEARNINGS.md` in the template repo
+
+### Check GitHub for New Learnings (ALWAYS — DO THIS FIRST)
+
+Before starting **any** significant work, **always check the template repo on GitHub for new learnings**. Other plugin agents push discoveries continuously — the repo may have new commits since your last session.
+
+Fetch the latest `LEARNINGS.md`:
+```
+https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
+```
+
+Also check the contributions folder for recent, unmerged findings:
+```
+https://github.com/pedrofuentes/stream-deck-template/tree/main/contributions
+```
+
+**This is not optional.** Skipping this risks repeating solved problems or missing critical pitfalls.
 
 ### Reading Knowledge From the Template
 
