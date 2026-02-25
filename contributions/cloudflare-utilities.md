@@ -4,11 +4,11 @@
 > **Status**: ✅ Merged into `LEARNINGS.md` on February 22, 2026
 
 ## Stats
-- **Test count**: 582 tests
-- **Source files**: 14+ TypeScript files
-- **Actions**: 4 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics)
-- **Services**: 6+ (cloudflare-api-client, cloudflare-workers-api, cloudflare-ai-gateway-api, global-settings-store, key-image-renderer, marquee-controller)
-- **Release**: v1.1.3
+- **Test count**: 1,081 tests
+- **Source files**: 28+ TypeScript files
+- **Actions**: 10 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics, Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric)
+- **Services**: 14+ (cloudflare-api-client, cloudflare-workers-api, cloudflare-ai-gateway-api, cloudflare-pages-api, cloudflare-dns-api, cloudflare-zone-analytics-api, cloudflare-r2-api, cloudflare-d1-api, cloudflare-kv-api, cloudflare-worker-analytics-api, global-settings-store, key-image-renderer, marquee-controller, polling-coordinator)
+- **Release**: v1.2.0
 
 ## Key Topics Contributed
 - Accent bar pattern for status indication
@@ -50,3 +50,15 @@
 - SETUP-PROMPT.md — one-shot prompt to bootstrap marketplace content for any new plugin
 - Post-release marketplace content update — mandatory step in release checklist
 - Release notes and description character limit management
+
+### v1.2.0 Contributions (February 24, 2026)
+- 6 new actions: Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric
+- Unified `formatTimeAgo` with style options — DRY consolidation of 3 duplicate implementations into 1 with `{ style: "compact" | "long" }` option
+- Multiple marquee controllers per action — DNS Record Monitor uses 3 independent MarqueeControllers for name, content, and detail lines
+- Non-cycling action pattern — key press triggers manual refresh instead of metric cycling (DNS, Pages)
+- Cloudflare GraphQL API dataset name pitfalls — documented that dataset names are NOT guessable (`kvOperationsAdaptiveGroups` not `workersKvStorageAdaptiveGroups`), fields vary between datasets
+- REST API fallback strategy — prefer REST when GraphQL dataset existence is unconfirmed (e.g., D1 database size via `/d1/database/{id}`)
+- Display name tracking — save both resource ID and human-readable name in settings, use `displayName ?? resourceId` everywhere
+- Systematic action test rewrite pattern — comprehensive coverage strategy (lifecycle, coordinator, marquee, error backoff, global settings) that brought coverage from ~65% to 94%
+- `display refresh interval` pattern for Pages — 60-second timer re-renders from cached data to update "Xm ago" text without API calls
+- `resolveState` priority pattern — failed > building > success for deployment status resolution

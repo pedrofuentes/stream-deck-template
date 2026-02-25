@@ -191,6 +191,38 @@ Design decisions:
 
 ---
 
+### Unified formatTimeAgo with Style Options
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+When multiple actions need time-ago formatting with different lengths (e.g., "2h ago" for spacious layouts, "2h" for compact key lines), consolidate into one function with a style parameter instead of duplicating:
+
+```typescript
+export type FormatTimeAgoOptions = {
+  now?: number;        // injectable for tests
+  style?: "compact" | "long";  // "long" = "2h ago", "compact" = "2h"
+};
+
+export function formatTimeAgo(
+  time: number | string,
+  options: FormatTimeAgoOptions = {}
+): string {
+  const { now = Date.now(), style = "long" } = options;
+  const ms = typeof time === "string" ? new Date(time).getTime() : time;
+  const seconds = Math.round((now - ms) / 1000);
+  // ... format logic ...
+  return style === "compact" ? `${value}${unit}` : `${value}${unit} ago`;
+}
+```
+
+**Key design decisions:**
+- `now` parameter for deterministic testing without fake timers
+- Default style is "long" for backward compatibility
+- "just now" for < 10 seconds (long style only)
+- Export the options type so consumers can build wrappers
+
+---
+
 ## 2. Manifest.json Gotchas
 
 ### Image Path Rules
@@ -910,6 +942,46 @@ override onWillDisappear(): void {
 
 ---
 
+### Multiple Marquee Controllers Per Action
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+Some actions display multiple lines that may all need independent marquee scrolling. Create separate `MarqueeController` instances per line:
+
+```typescript
+private marqueeName = new MarqueeController(LINE1_MAX_CHARS);    // 10 chars
+private marqueeContent = new MarqueeController(LINE2_MAX_CHARS); // 7 chars
+private marqueeDetail = new MarqueeController(LINE3_MAX_CHARS);  // 13 chars
+
+private onMarqueeTick(): void {
+  const c1 = this.marqueeName.tick();
+  const c2 = this.marqueeContent.tick();
+  const c3 = this.marqueeDetail.tick();
+  if (c1 || c2 || c3) this.reRender();
+}
+```
+
+Each controller tracks its own scroll position. A single `setInterval` drives all ticks, and re-renders only when at least one changed.
+
+### Non-Cycling Actions (Manual Refresh on Key Press)
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+Not every action needs metric cycling. For status-oriented actions (DNS record monitor, Pages deployment), key press triggers a manual refresh instead:
+
+```typescript
+override async onKeyDown(ev: KeyDownEvent<MySettings>): Promise<void> {
+  const global = getGlobalSettings();
+  if (!this.hasRequiredSettings(ev.payload.settings, global)) return;
+  this.apiClient = new MyApi(global.apiToken!, global.accountId!);
+  await this.updateStatus(ev); // immediate re-fetch + re-render
+}
+```
+
+No `pendingKeyCycle` flag needed. No metric index. Just fetch fresh data and display.
+
+---
+
 ## 5. Architecture Patterns
 
 ### Global Settings Pub/Sub for Shared Credentials
@@ -1074,6 +1146,49 @@ This applies to any service using Atlassian Statuspage — look for the `<page-i
 
 ---
 
+### Cloudflare GraphQL API Dataset Pitfalls
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+Cloudflare's GraphQL Analytics API uses specific dataset names that are **not documented consistently** and cannot be guessed from product names:
+
+| Product | Correct Dataset | Wrong Guess |
+|---|---|---|
+| Zone HTTP | `httpRequests1dGroups` | `httpRequestsAdaptiveGroups` |
+| D1 | `d1AnalyticsAdaptiveGroups` | `d1DatabaseAnalytics` |
+| R2 storage | `r2StorageAdaptiveGroups` | `r2BucketAnalytics` |
+| R2 operations | `r2OperationsAdaptiveGroups` | — |
+| KV operations | `kvOperationsAdaptiveGroups` | `workersKvStorageAdaptiveGroups` ❌ |
+| Workers | REST API (not GraphQL) | `workersAnalyticsAdaptiveGroups` ❌ |
+
+**Rules:**
+- Dataset fields and aggregations vary: some have `sum` but not `max`, some have `max` but not `sum`
+- **Always test the actual GraphQL query against the live API** before committing
+- When uncertain, prefer the REST API (better documented, more stable)
+- For metadata like database size, use the resource detail endpoint (e.g., D1: `/d1/database/{id}` → `file_size`)
+
+### Display Name Tracking in Settings
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+Every action's Property Inspector should save **both** the resource ID and human-readable name:
+
+```typescript
+interface MySettings {
+  databaseId?: string;
+  databaseName?: string;  // always save alongside ID
+}
+```
+
+In action code, always display the name:
+```typescript
+const displayName = settings.databaseName ?? settings.databaseId ?? "Unknown";
+```
+
+Track `lastDisplayName` alongside `lastResourceId` to avoid unnecessary re-renders. The PI saves the name via `actionSettings.xxxName = label` in the FilterableSelect `onChange` handler.
+
+---
+
 ## 6. Testing Patterns
 
 ### Mocking the Stream Deck SDK
@@ -1148,6 +1263,34 @@ __fixtures__/
 └── apple/
     └── apple-webcal.ics
 ```
+
+---
+
+### Systematic Action Test Coverage Pattern
+
+*(Source: cloudflare-utilities v1.2.0)*
+
+To bring action test coverage from ~40% to 90%+, follow this systematic test structure for every action:
+
+1. **API mock class** — `vi.mock` with `importOriginal` to preserve exports, replace the API class
+2. **capturedGlobalListener** — capture the `onGlobalSettingsChanged` callback for testing credential changes
+3. **VALID_SETTINGS** — constant with minimal valid settings for the action
+4. **Test sections** (in order):
+   - `hasRequiredSettings` / `hasCredentials` — boundary cases
+   - `renderXxx` — visual output (colors, truncation, data URI format)
+   - `onWillAppear` — setup, placeholder, fetch, error states
+   - `onDidReceiveSettings` — settings changes, refetch behavior  
+   - `onWillDisappear` — cleanup, stop polling
+   - `onKeyDown` — manual refresh or metric cycling
+   - `error back-off` — cached display preserved, ERR when no cache
+   - `marquee` — scroll for long names, stop on disappear
+   - `global settings change` — re-initialize or show setup
+
+**Key patterns:**
+- Use `vi.useFakeTimers()` in `beforeEach`, `vi.useRealTimers()` in `afterEach`
+- Call `resetPollingCoordinator()` in `afterEach` to prevent state leaks
+- Use short default names in `makeRecord()`/`makeStatus()` to avoid triggering marquee in non-marquee tests
+- Test marquee separately with explicitly long names
 
 ---
 
@@ -1509,6 +1652,9 @@ Examples: `feat/worker-analytics-action`, `fix/rate-limit-handling`, `chore/bump
 | Skipping marketplace content update on release | Stale listing, missing release notes on Elgato Marketplace | Run the Post-Release Marketplace Content Update checklist |
 | Pasting markdown into Elgato WYSIWYG editor | Unformatted text, lost formatting | Use `marketplace-content.html` copy-paste approach |
 | Mixing sdpi-components with custom PI components | sdpi-components overwrites custom component settings via `setSettings` | Use WebSocket send interceptor to merge `_actionSettings` into every outgoing `setSettings` |
+| Guessing Cloudflare GraphQL dataset names | Query returns empty data or errors — dataset doesn't exist | Only use dataset names confirmed in working code or live API testing |
+| Duplicating `formatTimeAgo` across actions | 3 drifting implementations with different edge-case behavior | Consolidate into one parameterized function with style options |
+| Using long default names in test fixtures | Triggers marquee in non-marquee tests, causes false failures | Use short names (< 10 chars) in `makeRecord()`/`makeStatus()`, test marquee separately with long names |
 | Not suppressing `didReceiveSettings` echoes in PI | Stale echo reverts user's dropdown change during debounce window | Track `_lastSendTime`, skip `_actionSettings` update for echoes within 500ms |
 | Plugin calling `setSettings()` to persist defaults | Echo races with PI debounce, reverts user's next change | Inject defaults in PI send interceptor, not in plugin |
 | Using `pendingKeyCycle` boolean for multi-button | One button's flag masks another's echo | Use `Set<string>` keyed by `action.id` with `delete()` one-shot guard |
