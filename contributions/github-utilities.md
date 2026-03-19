@@ -363,3 +363,309 @@ override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<MySettings>): Pr
 - Clean up both Maps in `onWillDisappear`
 
 **Prevention**: Any action that calls `setSettings()` programmatically (cycling, auto-defaults) must guard `onDidReceiveSettings` against the resulting echo. Use a `Set<string>` for the guard, not a boolean flag, to support multiple concurrent buttons.
+
+---
+
+## v2.0.0 Contributions (New)
+
+### Stats Update
+- **Test count**: 735 tests, 24 test files
+- **Source files**: 35+ TypeScript files
+- **Actions**: 12 (7 original + 5 new)
+- **Latest Release**: v2.0.0
+
+### [Encoder] — Touch Strip Rendering via Single Pixmap Layout
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: critical
+
+**Problem**: The built-in touch strip layout types (bar, gbar, text) are too limited for custom visualizations (sparklines, heatmaps, arc gauges, branch diagrams). Each layout item type has fixed rendering — no curves, no gradients, no complex shapes.
+
+**Solution**: Use a single `pixmap` layout item covering the full 200×100 canvas. Generate complete SVG strings and pass them via `setFeedback({ canvas: svgDataUri })`:
+
+```json
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+  "id": "github-full-canvas",
+  "items": [{ "key": "canvas", "type": "pixmap", "rect": [0, 0, 200, 100] }]
+}
+```
+
+**Critical encoding**: The SVG must be wrapped as a data URI: `"data:image/svg+xml," + encodeURIComponent(svg)`. Raw SVG strings do NOT work with `setFeedback`. This matches the encoding used for `setImage` on keys.
+
+**Key details**:
+- Call `setFeedbackLayout("layouts/your-layout.json")` in `onWillAppear` BEFORE any `setFeedback` calls — the layout must be assigned first or feedback is silently ignored
+- The 200×100 canvas is per-encoder (each dial owns one quarter of the 800×100 strip)
+- SVG rendering gives complete freedom: Bézier sparklines, arc gauges, heatmap grids, metro-map diagrams
+
+---
+
+### [Encoder] — Multi-Quarter Contiguous Rendering
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: important
+
+**Problem**: Actions like contribution heatmaps and branch network diagrams benefit from spanning 2-4 adjacent touch strip quarters. Each quarter is independently rendered by a separate action instance. The quarters must tile seamlessly.
+
+**Solution**: Use `ev.payload.coordinates.column` (0-3) to auto-detect dial position. Find sibling instances (same action class + same repo) among `this.actions`, sort by column, and compute relative position:
+
+```typescript
+private getBaseOffset(actionId: string): number {
+    const settings = this.actionSettings.get(actionId);
+    const myColumn = this.dialColumn.get(actionId) ?? 0;
+    const siblingColumns: number[] = [];
+    for (const a of this.actions) {
+        const s = this.actionSettings.get(a.id);
+        if (s?.repo === settings?.repo && a.isDial()) {
+            siblingColumns.push(this.dialColumn.get(a.id) ?? 0);
+        }
+    }
+    siblingColumns.sort((a, b) => a - b);
+    const idx = siblingColumns.indexOf(myColumn);
+    return (idx >= 0 ? idx : 0) * 200; // 200px per quarter
+}
+```
+
+**Critical pitfall**: Do NOT use raw `column` as the offset. If branch-network is on dials 0-2 and heatmap on dial 3, the heatmap would get offset 600px (thinking it's quarter 4). The relative-position approach fixes this: heatmap sees no siblings → offset 0 (standalone).
+
+**Synced scrolling**: Use `static` Maps on the class keyed by repo to share scroll state across siblings. When one dial rotates, render ALL siblings:
+
+```typescript
+private static sharedScrollH = new Map<string, number>();
+```
+
+**Data sharing**: Before making API calls, check if a sibling already cached the data for the same repo — reuse it instead of duplicate calls.
+
+---
+
+### [Encoder] — Dial Event Handlers Pattern
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: important
+
+**Problem**: Need to add encoder support to existing keypad actions without breaking keypad behavior.
+
+**Solution**: Add `Controllers: ["Keypad", "Encoder"]` to manifest. Use `isDial()` guards:
+
+```typescript
+override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
+    if (ev.action.isKey()) {
+        // Existing keypad rendering...
+    }
+    if (ev.action.isDial()) {
+        this.dialColumn.set(ev.action.id, ev.payload.coordinates?.column ?? 0);
+        await ev.action.setFeedbackLayout("layouts/my-layout.json");
+        await ev.action.setFeedback({ canvas: renderStripLoading() });
+    }
+    // Shared logic (polling, data fetch) runs for both
+}
+```
+
+**Dial events available**:
+- `onDialRotate(ev)` — `ev.payload.ticks` (signed), `ev.payload.pressed` (bool)
+- `onDialDown(ev)` / `onDialUp(ev)` — press/release
+- `onTouchTap(ev)` — `ev.payload.hold` (bool), `ev.payload.tapPos` ([x,y])
+
+**Press+rotate pattern**: Use `ev.payload.pressed` in `onDialRotate` for two-axis control (e.g., horizontal scroll normally, vertical scroll while pressed).
+
+---
+
+### [Encoder] — setFeedbackLayout Must Be Called First
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: critical
+
+**Problem**: Dial actions show "Setup Required" on the touch strip even after configuration. The touch strip never updates despite `setFeedback` being called correctly.
+
+**Root cause**: `setFeedback()` is silently ignored if no layout has been assigned to the encoder. The layout must be set before any feedback.
+
+**Solution**: Call `setFeedbackLayout()` in `onWillAppear` before any `setFeedback` call:
+
+```typescript
+if (ev.action.isDial()) {
+    await ev.action.setFeedbackLayout("layouts/github-full-canvas.json"); // ← MUST be first
+    await ev.action.setFeedback({ canvas: renderStripUnconfigured() });
+}
+```
+
+---
+
+### [Performance] — Cache Action Contexts in a Map
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: medium
+
+**Problem**: `[...this.actions].find((a) => a.id === actionId)` spreads the entire collection and does a linear search. This runs on every polling cycle, every render, and every dial rotation.
+
+**Solution**: Cache action references in a Map populated in `onWillAppear`, cleaned in `onWillDisappear`:
+
+```typescript
+private actionContexts = new Map<string, Action<Settings>>();
+
+override onWillAppear(ev) { this.actionContexts.set(ev.action.id, ev.action); }
+override onWillDisappear(ev) { this.actionContexts.delete(ev.action.id); }
+
+// O(1) lookup instead of O(n) spread+find:
+const ctx = this.actionContexts.get(actionId);
+```
+
+---
+
+### [Performance] — Throttle setFeedback During Dial Rotation
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: medium
+
+**Problem**: Each dial rotation tick triggers SVG generation + `setFeedback` for all sibling quarters. With 4 quarters, that's 4 SVGs rendered per tick, potentially 20 renders/second during fast scrolling.
+
+**Solution**: Debounce rendering to ~60fps:
+
+```typescript
+private renderTimeout: ReturnType<typeof setTimeout> | null = null;
+
+override async onDialRotate(ev): Promise<void> {
+    // Update scroll state immediately
+    BranchNetworkAction.sharedScrollH.set(repo, newOffset);
+    // Throttle the actual render
+    if (this.renderTimeout) clearTimeout(this.renderTimeout);
+    this.renderTimeout = setTimeout(() => {
+        this.renderAllSiblings(repo).catch(() => {});
+    }, 16); // ~60fps
+}
+```
+
+---
+
+### [Performance] — Array.join() for SVG String Building
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: low
+
+**Problem**: SVG renderers building heatmaps (364 cells) use string `+=` concatenation in loops, which is O(n²) in worst case.
+
+**Solution**: Use `Array.push()` + `.join("")`:
+
+```typescript
+const parts: string[] = [];
+weeklyData.forEach((week) => {
+    week.forEach((v, d) => {
+        parts.push(`<rect x="${x}" y="${y}" .../>`);
+    });
+});
+const content = parts.join("");
+```
+
+---
+
+### [Rendering] — SVG Gradients Don't Render on SD+ Touch Strip
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: important
+
+**Problem**: `<linearGradient>` and `<radialGradient>` elements in SVG don't render correctly on the Stream Deck+ touch strip hardware. The gradient appears solid or invisible.
+
+**Solution**: Replace all gradients with flat colors at reduced opacity:
+
+```xml
+<!-- BAD: gradient doesn't render -->
+<defs>
+  <radialGradient id="glow" ...>...</radialGradient>
+</defs>
+<rect fill="url(#glow)"/>
+
+<!-- GOOD: flat color with opacity -->
+<rect fill="#3fb950" fill-opacity="0.06"/>
+```
+
+---
+
+### [Action] — Double-Click Detection for Force Refresh
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: low
+
+**Problem**: Users want to force-refresh data without waiting for the poll interval. Existing controls (short press, long press) are taken.
+
+**Solution**: Track last key-up time. If two presses within 400ms, treat as double-click:
+
+```typescript
+private lastKeyUpTime = new Map<string, number>();
+
+override async onKeyUp(ev): Promise<void> {
+    const now = Date.now();
+    const lastUp = this.lastKeyUpTime.get(ev.action.id) ?? 0;
+    this.lastKeyUpTime.set(ev.action.id, now);
+    if (now - lastUp < 400) {
+        this.lastKeyUpTime.delete(ev.action.id);
+        await this.refresh(ev.action.id); // Force refresh
+        return;
+    }
+    // Normal press handling...
+}
+```
+
+---
+
+### [API] — GitHub GraphQL for Profile Contribution Calendar
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: important
+
+**Problem**: GitHub REST API only provides per-repo commit data. The profile contribution calendar (all repos, all contribution types) is only available via GraphQL.
+
+**Solution**: Use the GraphQL `contributionsCollection` query:
+
+```typescript
+const query = `query { viewer { contributionsCollection { contributionCalendar { totalContributions weeks { contributionDays { date contributionCount } } } } } }`;
+
+const response = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+});
+```
+
+**Key details**:
+- Uses the same PAT as REST — no additional permissions for public data
+- Returns the exact same data shown on the GitHub profile page
+- `viewer` query fetches for the token owner; `user(login: "...")` for others
+- Day order is Sun-Sat; reorder to Mon-Sun for standard display
+- GraphQL has its own rate limit (5,000 points/hour), separate from REST
+
+---
+
+### [Rendering] — Fixed Summary Panel with Scrolling Content
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-19
+**Severity**: important
+
+**Problem**: Heatmap has a summary panel (commit count, labels) on the left and a scrollable grid on the right. When the grid scrolls, the summary must stay fixed. But both render into the same SVG.
+
+**Solution**: Render cells first, then render the summary panel ON TOP with a black background mask:
+
+```typescript
+// 1. Render cells (may overlap summary area when scrolled)
+cells.forEach((cell) => {
+    if (showSummary && cell.x < summaryWidth) return; // clip
+    parts.push(`<rect x="${cell.x}" .../>`);
+});
+
+// 2. Render summary AFTER cells (higher z-order in SVG)
+if (showSummary) {
+    parts.push(`<rect x="0" width="${summaryWidth}" height="100" fill="#000"/>`); // mask
+    parts.push(`<text x="6" y="20">${totalCommits}</text>`); // overlay
+}
+```
+
+**Critical pitfall**: Don't use `offset < 200` to determine if summary should show — when scroll offset exceeds 200px, the summary vanishes. Use an explicit `showSummary` boolean parameter based on the action's relative position (first sibling = show summary).
