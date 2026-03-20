@@ -669,3 +669,291 @@ if (showSummary) {
 ```
 
 **Critical pitfall**: Don't use `offset < 200` to determine if summary should show — when scroll offset exceeds 200px, the summary vanishes. Use an explicit `showSummary` boolean parameter based on the action's relative position (first sibling = show summary).
+
+---
+
+## v2.2.4 Contributions (New)
+
+### Stats Update
+- **Test count**: 1,145 tests, 31 test files
+- **Source files**: 44 TypeScript files
+- **Actions**: 14
+- **Latest Release**: v2.2.4
+
+### Key Topics Contributed
+- Double-click debounce pattern for `openUrl` vs force-refresh
+- Network resilience: `fetchWithTimeout()` with AbortSignal
+- TypeScript exhaustive switch checking for union-typed fragment dispatchers
+- `DebouncedUrlOpener` shared utility class (reducing cross-action boilerplate)
+- setTimeout leak prevention pattern (tracked timers + cleanup on disappear)
+- Polling interval input sanitization (NaN, Infinity, max bound)
+- STAT_LABELS compile-time exhaustiveness via `as const satisfies`
+- Silent catch block observability (debug logging on fallback paths)
+
+---
+
+### [Action Pattern] — Debounced URL Open for Double-Click Detection
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: critical
+
+**Problem**: Stream Deck buttons commonly use single-click to open a URL and double-click to force-refresh. The naïve approach (check timestamp of previous click) is **fundamentally broken**: the first click's `openUrl()` executes immediately because the code can't predict whether a second click is coming. By the time the second click arrives and triggers force-refresh, the browser tab has already opened.
+
+**Broken pattern** (reactive detection):
+```typescript
+// onKeyDown
+const lastUp = this.lastKeyUpTime.get(ev.action.id) ?? 0;
+this.lastKeyUpTime.set(ev.action.id, Date.now());
+if (Date.now() - lastUp < 400) {
+    // Double-click → refresh
+    return;
+}
+// First click reaches here immediately → opens URL
+await streamDeck.system.openUrl(url);
+```
+
+**Solution**: Debounce the URL open. On first click, **schedule** the URL to open after 400ms. If a second click arrives within that window, cancel the timer and force-refresh instead:
+
+```typescript
+export class DebouncedUrlOpener {
+    private timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    /** Returns true if this is a double-click (second press within 400ms). */
+    handlePress(actionId: string): boolean {
+        const pending = this.timers.get(actionId);
+        if (pending) {
+            clearTimeout(pending);
+            this.timers.delete(actionId);
+            return true; // double-click
+        }
+        return false; // first click
+    }
+
+    /** Schedule URL open after the double-click detection window. */
+    scheduleOpen(actionId: string, url: string): void {
+        this.timers.set(actionId, setTimeout(() => {
+            this.timers.delete(actionId);
+            streamDeck.system.openUrl(url);
+        }, 400));
+    }
+
+    /** Cancel pending timer. Call in onWillDisappear. */
+    cleanup(actionId: string): void {
+        const timer = this.timers.get(actionId);
+        if (timer) {
+            clearTimeout(timer);
+            this.timers.delete(actionId);
+        }
+    }
+}
+```
+
+**Usage in action**:
+```typescript
+private urlOpener = new DebouncedUrlOpener();
+
+async onKeyDown(ev) {
+    if (this.urlOpener.handlePress(ev.action.id)) {
+        this.polling.resetBackoff(ev.action.id);
+        await this.refreshData(ev.action.id, true);
+        return;
+    }
+    // Compute URL, then schedule (not immediate)
+    this.urlOpener.scheduleOpen(ev.action.id, url);
+}
+
+async onWillDisappear(ev) {
+    this.urlOpener.cleanup(ev.action.id);
+}
+```
+
+**Key insight**: Extract the debounce class into a shared utility — every action with single-click/double-click behavior needs this exact pattern. Without extraction, you get 12+ copies of the same timer management code.
+
+**Prevention**: Never call `openUrl()` synchronously in `onKeyDown` if double-click is a supported gesture. Always debounce.
+
+---
+
+### [Network] — fetchWithTimeout() Wrapper for All API Calls
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: critical
+
+**Problem**: Raw `fetch()` calls have two dangerous failure modes: (1) no timeout — a stalled connection hangs indefinitely, blocking the action refresh; (2) no try-catch — network failures (`TypeError: fetch failed`) propagate as untyped errors with zero context about which API call failed.
+
+**Solution**: Wrap all fetch calls with a timeout + error context helper:
+
+```typescript
+async function fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+    context?: string,
+): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+            throw new GitHubApiError(
+                `Request timed out after 30s${context ? ` (${context})` : ""}`, 0);
+        }
+        throw new GitHubApiError(
+            `Network error: ${err instanceof Error ? err.message : "unknown"}${context ? ` (${context})` : ""}`, 0);
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+```
+
+**Key details**:
+- Use `AbortController` + `AbortSignal` for timeout (Node 18+)
+- `finally` block clears the timeout to prevent leaks on success
+- `status: 0` convention distinguishes network errors from HTTP errors
+- Context string (e.g., `"fetchRepoStats"`) makes error logs actionable
+- Apply to EVERY fetch call in the codebase — no exceptions
+
+**Prevention**: Never use bare `fetch()` in a Stream Deck plugin. Network hiccups are common (sleep/wake, Wi-Fi drops) and a single hung request blocks the entire action's polling cycle.
+
+---
+
+### [TypeScript] — Exhaustive Switch Checking with `never` Default
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: high
+
+**Problem**: When a `switch` statement dispatches on a union type (e.g., `DataFragmentName` with 12 values), adding a new value to the union compiles fine — but the switch silently skips it. No runtime error, no compile error. The new fragment just doesn't work.
+
+**Solution**: Add a `default` case that assigns to `never`:
+
+```typescript
+type DataFragmentName = "repoMetadata" | "prCount" | "issueCount" | ...;
+
+switch (fragment) {
+    case "repoMetadata": /* ... */ break;
+    case "prCount": /* ... */ break;
+    // ... all cases ...
+    default: {
+        const _exhaustiveCheck: never = fragment;
+        throw new Error(`Unhandled fragment type: ${_exhaustiveCheck}`);
+    }
+}
+```
+
+If a new value is added to the union but not to the switch, TypeScript reports: `Type '"newFragment"' is not assignable to type 'never'`.
+
+**When to use `default: break` instead**: If the switch intentionally handles only a subset (e.g., GraphQL extraction that skips REST-only fragments), use `default: break;` — NOT the `never` check.
+
+**Prevention**: Every switch on a union type should have either `default: never` (exhaustive) or `default: break` with a comment explaining why some cases are intentionally skipped.
+
+---
+
+### [Resource Management] — Track All setTimeout IDs for Cleanup
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: high
+
+**Problem**: Inline `setTimeout` calls (e.g., retry after API returns 202, post-dispatch refresh) create timers that fire even after the action disappears. If the callback references `this`, it operates on stale state. In long sessions, untracked timers accumulate.
+
+**Solution**: Store every `setTimeout` ID in a Map and clear in `onWillDisappear`:
+
+```typescript
+private retryTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+// When creating a timeout:
+const id = setTimeout(() => {
+    this.retryTimeouts.delete(actionId);
+    this.doRetry(actionId);
+}, 5000);
+this.retryTimeouts.set(actionId, id);
+
+// In onWillDisappear:
+const timeout = this.retryTimeouts.get(ev.action.id);
+if (timeout) {
+    clearTimeout(timeout);
+    this.retryTimeouts.delete(ev.action.id);
+}
+```
+
+**Rule**: If you write `setTimeout()` inside an action class, you MUST store its ID and clear it on disappear. No exceptions — even for "short" timers (3-5 seconds).
+
+---
+
+### [Type Safety] — STAT_LABELS Compile-Time Exhaustiveness
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: medium
+
+**Problem**: Two separate `STAT_LABELS` maps (one for key images, one for touch strip) must stay in sync with the `StatType` union. Adding a new stat type and forgetting to update either map causes a runtime fallback to the raw type string — no compile error.
+
+**Solution**: Use `as const satisfies Record<StatType, string>`:
+
+```typescript
+export const STAT_LABELS = {
+    stars: "Stars",
+    issues: "Issues",
+    forks: "Forks",
+    // ...
+} as const satisfies Record<StatType, string>;
+```
+
+If a new `StatType` value is added, TypeScript errors: `Property '"newStat"' is missing`.
+
+**Prevention**: Any `Record` keyed by a union type should use `satisfies` to enforce completeness at compile time.
+
+---
+
+### [Observability] — Log Silent Catch Blocks in Fallback Chains
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: medium
+
+**Problem**: GraphQL→REST fallback chains silently swallow errors (`catch {}`). When the fallback also fails, there's zero visibility into WHY GraphQL failed and WHY REST also failed. Production debugging is impossible.
+
+**Solution**: Change bare `catch {}` to `catch (err)` and add debug logging:
+
+```typescript
+try {
+    await this.fetchGraphQLBatch(repo, fragments, token);
+} catch (err) {
+    streamDeck.logger.debug(
+        `GraphQL batch failed for ${repo}: ${err instanceof Error ? err.message : "unknown"}`
+    );
+    // Fall through to REST fallback
+}
+```
+
+**Rule**: Never write `catch {}` or `catch { /* comment */ }`. At minimum, log the error at debug level with the operation context (repo, fragment name, etc.). Debug logs don't appear in production unless explicitly enabled, so there's no noise cost.
+
+---
+
+### [Input Validation] — Polling Interval Sanitization
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-20
+**Severity**: medium
+
+**Problem**: User-configurable refresh intervals accept any number. `NaN`, `Infinity`, negative values, or extremely large numbers (e.g., 999999 seconds ≈ 11 days) break polling behavior.
+
+**Solution**: Sanitize before use with min/max clamping + NaN/Infinity guard:
+
+```typescript
+const DEFAULT_MAX_INTERVAL_SEC = 3600; // 1 hour
+
+start(actionId: string, callback: () => Promise<void>,
+      intervalSec: number, minIntervalSec = 15,
+      maxIntervalSec = DEFAULT_MAX_INTERVAL_SEC): void {
+    const sanitized = Number.isFinite(intervalSec) && intervalSec > 0
+        ? intervalSec
+        : minIntervalSec;
+    const clamped = Math.min(Math.max(sanitized, minIntervalSec), maxIntervalSec) * 1000;
+    // Use clamped as the base interval
+}
+```
+
+**Prevention**: Any numeric setting from the Property Inspector should be sanitized before use. `Number.isFinite()` catches both `NaN` and `±Infinity` in one check.
