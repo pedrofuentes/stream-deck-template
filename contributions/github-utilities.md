@@ -675,8 +675,8 @@ if (showSummary) {
 ## v2.2.4 Contributions (New)
 
 ### Stats Update
-- **Test count**: 1,145 tests, 31 test files
-- **Source files**: 44 TypeScript files
+- **Test count**: 1,562 tests, 44 test files
+- **Source files**: 48 TypeScript files
 - **Actions**: 14
 - **Latest Release**: v2.2.4
 
@@ -689,6 +689,223 @@ if (showSummary) {
 - Polling interval input sanitization (NaN, Infinity, max bound)
 - STAT_LABELS compile-time exhaustiveness via `as const satisfies`
 - Silent catch block observability (debug logging on fallback paths)
+
+### v2.2.4 P3 Contributions (March 21, 2026)
+- BaseGitHubAction abstract class — reducing 14-action boilerplate via inheritance
+- Fragment strategy pattern — registry-based coordinator dispatch replacing switch statements
+- Zod runtime validation — replacing unsafe `as` casts in API response handling
+- Settings interface composition — `extends` hierarchy eliminating field duplication
+- Snapshot testing for SVG renderers — golden master regression detection
+- RenderDebouncer utility — shared dial-rotation render throttling
+- Deployment pitfall: `streamdeck link` + `streamdeck restart` must both run after builds
+
+---
+
+### [Architecture] — Abstract Base Class for Action Boilerplate
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: critical
+
+**Problem**: All 14 action classes duplicate ~150-170 lines of identical boilerplate: instance Map declarations (`polling`, `actionSettings`, `actionContexts`, `urlOpener`), `onWillDisappear` cleanup, `onSendToPlugin` PI handler, and error classification. Adding a new action requires copying 200+ lines of scaffolding.
+
+**Solution**: Create `BaseGitHubAction<TSettings>` abstract class that all actions extend:
+
+```typescript
+export abstract class BaseGitHubAction<TSettings extends RepoActionSettings>
+	extends SingletonAction<TSettings> {
+
+	protected polling = new PollingCoordinator();
+	protected urlOpener = new DebouncedUrlOpener();
+	protected actionSettings = new Map<string, TSettings>();
+	protected actionContexts = new Map<string, Action<TSettings>>();
+
+	override async onWillDisappear(ev) {
+		this.polling.stop(ev.action.id);
+		this.coordinator.unsubscribe(ev.action.id);
+		this.urlOpener.cleanup(ev.action.id);
+		this.actionSettings.delete(ev.action.id);
+		this.actionContexts.delete(ev.action.id);
+	}
+
+	override async onSendToPlugin(ev) {
+		const data = ev.payload as PIDataRequest;
+		await handlePIDataRequest(data, () => ev.action.getSettings());
+	}
+
+	protected async renderError(actionId: string, error: unknown): Promise<string> {
+		const errorLabel = classifyErrorLabel(error);
+		const ctx = this.actionContexts.get(actionId);
+		if (ctx) await ctx.setImage(renderErrorImage(errorLabel));
+		return errorLabel;
+	}
+}
+```
+
+**Key design decisions**:
+- Subclasses call `super.onWillDisappear(ev)` then clean up action-specific state (marquee data, trend cache, etc.)
+- Error classification is centralized via `classifyErrorLabel()` — no more `message.includes()` in each action
+- The SDK's `@action` decorator pattern works with class inheritance — no DI framework needed
+
+**Prevention**: Every new action should extend `BaseGitHubAction` — never extend `SingletonAction` directly.
+
+---
+
+### [Architecture] — Strategy Pattern for Fragment Dispatch
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: important
+
+**Problem**: The GraphQL coordinator had 3 switch statements dispatching on a `DataFragmentName` union (12 values). Adding a new fragment required editing 3 places. Missing a case caused silent failures.
+
+**Solution**: Replace switches with a `FragmentStrategy` interface + strategy registry:
+
+```typescript
+interface FragmentStrategy {
+	readonly name: DataFragmentName;
+	readonly supportsGraphQL: boolean;
+	extractFromGraphQL?(cache, repo, node, params): void;
+	fetchViaREST(cache, repo, token, params): Promise<void>;
+	assignToResult(result, cache, repo, params): void;
+}
+
+const fragmentRegistry = new Map<DataFragmentName, FragmentStrategy>();
+// Register all 12 strategies...
+
+// Usage in coordinator (replaces 3 switches):
+const strategy = fragmentRegistry.get(fragment);
+strategy.extractFromGraphQL(cache, repo, node, params);
+```
+
+**Benefits**: Adding a new fragment = create one class + register it. No coordinator changes. Each strategy is independently testable.
+
+---
+
+### [Validation] — Zod Schemas for API Response Safety
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: critical
+
+**Problem**: 88 `as` type assertions in API modules cast `response.json()` results without validation. If GitHub changes their API response shapes, the plugin silently misinterprets data or crashes.
+
+**Solution**: Add Zod as a production dependency and create schemas for all API response types:
+
+```typescript
+import { z } from "zod";
+
+export const RepoStatsSchema = z.object({
+	stargazers_count: z.number(),
+	forks_count: z.number(),
+	open_issues_count: z.number(),
+	full_name: z.string(),
+	language: z.string().nullable(),
+	// ... all accessed fields
+}).passthrough(); // allow extra fields from GitHub
+
+// Replace unsafe casts:
+// BEFORE: const data = (await response.json()) as Record<string, unknown>;
+// AFTER:  const data = RepoStatsSchema.parse(await response.json());
+```
+
+**Key details**:
+- Use `.passthrough()` so extra API fields don't cause failures
+- Use `.nullable()` and `.optional()` liberally — GitHub returns null for many fields
+- Zod is ~60KB but this runs in Node.js (not browser), so bundle size is acceptable
+- `.parse()` throws with descriptive error on invalid data — caught by existing error handling
+- Add `zod` to `dependencies` (not `devDependencies`) — it's a runtime dependency
+
+---
+
+### [Testing] — Snapshot Tests for SVG Renderers
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: important
+
+**Problem**: 28 SVG render functions produce complex output (colors, layout, font sizes, text escaping). Any accidental change to rendering goes undetected by unit tests that only check `expect(svg).toContain("Stars")`.
+
+**Solution**: Use Vitest's built-in `toMatchSnapshot()` to capture exact SVG output:
+
+```typescript
+describe("Button renderer snapshots", () => {
+	it("renderStatImage — stars", () => {
+		expect(renderStatImage("42K", "stars", "facebook/react")).toMatchSnapshot();
+	});
+
+	it("renderErrorImage — rate limited", () => {
+		expect(renderErrorImage("Rate Limited")).toMatchSnapshot();
+	});
+
+	// Edge cases
+	it("renderStatImage — XSS characters escaped", () => {
+		expect(renderStatImage("<script>", "language", "evil/repo&co")).toMatchSnapshot();
+	});
+});
+```
+
+**Key details**:
+- Snapshots auto-generate in `__snapshots__/` directories
+- Run `npx vitest run tests/renderers/ --update` to regenerate after intentional changes
+- Review snapshot diffs carefully — they show exact SVG differences
+- Include edge cases: XSS characters, empty strings, very long values, all stat types/status values
+
+---
+
+### [TypeScript] — Settings Interface Composition via extends
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: medium
+
+**Problem**: 13 settings interfaces independently declare `repo?: string; refreshInterval?: number; [key: string]: JsonValue`. Five minimal-settings actions have identical interfaces. No `extends` is used.
+
+**Solution**: Create a hierarchy:
+
+```typescript
+interface RepoActionSettings {
+	repo?: string;
+	refreshInterval?: number;
+	[key: string]: JsonValue;
+}
+
+interface StateFilteredSettings extends RepoActionSettings {
+	stateFilter?: "open" | "closed" | "all";
+}
+
+// Minimal actions become type aliases:
+type BranchNetworkSettings = RepoActionSettings;
+type FleetMonitorSettings = RepoActionSettings;
+
+// Specific actions extend the right base:
+interface IssueCounterSettings extends StateFilteredSettings {}
+interface RepoStatsSettings extends RepoActionSettings { statType?: StatType; }
+```
+
+**Prevention**: Always check existing base interfaces before creating a new settings type. If your action only needs `repo` + `refreshInterval`, use `RepoActionSettings` directly.
+
+---
+
+### [Deployment Pitfall] — streamdeck link + restart Required Together
+
+**Discovered in**: github-utilities
+**Date**: 2026-03-21
+**Severity**: critical
+
+**Problem**: After `npm run build && streamdeck restart`, the Property Inspector panels show completely blank/white. The plugin runs fine (buttons render, API calls work), but clicking the gear icon shows nothing.
+
+**Root cause**: The symlink from the Stream Deck plugins directory to `release/` can become stale after major code changes (especially structural changes like new directories, renamed files). Just restarting the plugin doesn't refresh the symlink.
+
+**Solution**: Always run both commands together:
+
+```bash
+npm run build
+streamdeck link release/com.pedrofuentes.github-utilities.sdPlugin
+streamdeck restart com.pedrofuentes.github-utilities
+```
+
+**Prevention**: Add this to your mental checklist and AGENTS.md Common Pitfalls. Never skip `streamdeck link` after builds.
 
 ---
 
